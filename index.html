@@ -157,6 +157,21 @@
   .day-cell-inner { min-height: 58px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
   .pill { border-radius: 9px; padding: 6px 4px; font-size: 10.5px; font-weight: 700; text-align: center; width: 100%; line-height: 1.25; }
   .pill.work { background: var(--green-100); color: var(--green-700); }
+  .comment-badge {
+    display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 700;
+    padding: 2px 7px; border-radius: 999px; background: #dbe8ff; color: #2856c9; margin-top: 4px;
+  }
+  .priority-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .priority-dot.rod { background: #c9382d; }
+  .priority-dot.gul { background: #d4a017; }
+  .priority-dot.gron { background: var(--green-600); }
+  .priority-badge {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700;
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .priority-badge.rod { background: #fdecec; color: #b3261e; }
+  .priority-badge.gul { background: #fff3d6; color: #92700a; }
+  .priority-badge.gron { background: var(--green-100); color: var(--green-700); }
   .pill.off { background: #f1efe8; color: #6b6f6a; }
   .pill.empty { color: var(--line); font-weight: 400; }
 
@@ -421,6 +436,8 @@
           <div class="nav-sub">Säljtävlingar</div>
         </div>
 
+        <div id="nav-card-tasks"></div>
+
         <div id="nav-card-users"></div>
 
         <div class="nav-card" onclick="showFranvaro()">
@@ -574,6 +591,17 @@
     </div>
   </div>
 
+  <!-- TILLDELADE UPPGIFTER VIEW -->
+  <div id="view-tasks" style="display:none;">
+    <div class="topbar with-back">
+      <button class="back-btn" onclick="showHome()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="title">Uppgifter</div>
+    </div>
+    <div class="kassa-content" id="tasks-results"></div>
+  </div>
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -683,6 +711,7 @@ async function logout() {
   document.getElementById("view-shared-schema").style.display = "none";
   document.getElementById("view-franvaro").style.display = "none";
   document.getElementById("view-traning").style.display = "none";
+  document.getElementById("view-tasks").style.display = "none";
   document.getElementById("view-login").style.display = "block";
   await renderLoginScreen();
 }
@@ -720,20 +749,45 @@ async function renderHomeForUser(user) {
   if (ideasCardWrap) {
     const bulbIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 18H15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10 21H14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M12 3C8.5 3 6 5.6 6 9C6 11.2 7.1 12.6 8.2 13.7C8.9 14.4 9 15 9 16H15C15 15 15.1 14.4 15.8 13.7C16.9 12.6 18 11.2 18 9C18 5.6 15.5 3 12 3Z" stroke="currentColor" stroke-width="1.7"/></svg>`;
     if (user.role === "chef") {
-      const unread = await fetchUnreadIdeaCount();
+      const unhandled = await fetchUnhandledIdeaCount();
       ideasCardWrap.innerHTML = `
-        <div class="nav-card ${unread > 0 ? "nav-card-alert" : ""}" onclick="showIdeas()">
+        <div class="nav-card ${unhandled > 0 ? "nav-card-alert" : ""}" onclick="showIdeas()">
           <div class="nav-icon">${bulbIcon}</div>
           <div class="nav-label">Nya idéer</div>
-          <div class="nav-sub">${unread > 0 ? `${unread} ny${unread === 1 ? "" : "a"} idé${unread === 1 ? "" : "er"}` : "Inga nya idéer"}</div>
+          <div class="nav-sub">${unhandled > 0 ? `${unhandled} ohanterad${unhandled === 1 ? "" : "e"}` : "Alla hanterade"}</div>
         </div>
       `;
     } else {
+      const unseenFeedback = await fetchUnseenFeedbackCount();
       ideasCardWrap.innerHTML = `
-        <div class="nav-card" onclick="showIdeas()">
+        <div class="nav-card ${unseenFeedback > 0 ? "nav-card-alert" : ""}" onclick="showIdeas()">
           <div class="nav-icon">${bulbIcon}</div>
           <div class="nav-label">Idélådan</div>
-          <div class="nav-sub">Dela en idé</div>
+          <div class="nav-sub">${unseenFeedback > 0 ? `${unseenFeedback} ny${unseenFeedback === 1 ? "" : "a"} feedback` : "Dela en idé"}</div>
+        </div>
+      `;
+    }
+  }
+
+  const tasksCardWrap = document.getElementById("nav-card-tasks");
+  if (tasksCardWrap) {
+    const clipboardIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="6" y="4" width="12" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M9 4V3.5C9 2.7 9.7 2 10.5 2H13.5C14.3 2 15 2.7 15 3.5V4" stroke="currentColor" stroke-width="1.7"/><path d="M9 11H15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M9 15H13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
+    if (user.role === "chef") {
+      tasksCardWrap.innerHTML = `
+        <div class="nav-card" onclick="showTasks()">
+          <div class="nav-icon">${clipboardIcon}</div>
+          <div class="nav-label">Tilldela uppgift</div>
+          <div class="nav-sub">Rikta mot en person</div>
+        </div>
+      `;
+    } else {
+      const { data: pendingTasks } = await sb.from("tilldelade_uppgifter").select("id").eq("target_user_id", user.id).eq("is_done", false);
+      const count = (pendingTasks || []).length;
+      tasksCardWrap.innerHTML = `
+        <div class="nav-card ${count > 0 ? "nav-card-alert" : ""}" onclick="showTasks()">
+          <div class="nav-icon">${clipboardIcon}</div>
+          <div class="nav-label">Uppgifter</div>
+          <div class="nav-sub">${count > 0 ? `${count} väntar` : "Inga väntar"}</div>
         </div>
       `;
     }
@@ -1063,31 +1117,105 @@ async function renderOrgChart() {
 }
 
 /* ---- Idélådan ---- */
-async function fetchUnreadIdeaCount() {
-  const { data, error } = await sb.from("ideer").select("id").eq("is_read", false);
+async function fetchUnhandledIdeaCount() {
+  const { data, error } = await sb.from("ideer").select("id").eq("handled", false);
   if (error) { console.error(error); return 0; }
   return data.length;
 }
+
+async function fetchUnseenFeedbackCount() {
+  const user = getCurrentUser();
+  if (!user) return 0;
+  const { data, error } = await sb.from("ideer").select("id, feedback_text").eq("user_id", user.id).eq("feedback_sedd", false);
+  if (error) { console.error(error); return 0; }
+  return data.filter(i => i.feedback_text).length;
+}
+
+let ideasTab = "aktiva"; // "aktiva" (ny + pågående) | "hanterade"
 
 async function showIdeas() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-ideas").style.display = "block";
   const user = getCurrentUser();
   document.getElementById("ideas-title").textContent = user && user.role === "chef" ? "Nya idéer" : "Idélådan";
+  ideasTab = "aktiva";
   await renderIdeasView();
+}
+
+function ideaStatusBadge(idea) {
+  if (idea.handled) return `<span class="org-badge" style="background:var(--green-100); color:var(--green-700);">Hanterad</span>`;
+  if (idea.is_read) return `<span class="org-badge" style="background:#fff3e6; color:#b5590a;">Pågående</span>`;
+  return `<span class="org-badge" style="background:#fdecec; color:#b3261e;">Ny</span>`;
 }
 
 function ideaRowHtml(idea, isChefView) {
   const date = new Date(idea.created_at).toLocaleDateString("sv-SE", { day: "numeric", month: "short", year: "numeric" });
   const senderLabel = idea.is_anonymous ? "Anonym" : idea.signum;
+  if (isChefView) {
+    return `
+      <div class="kassa-row" style="align-items:flex-start; flex-wrap:wrap; cursor:pointer;" onclick="openIdeaHandleModal('${idea.id}')">
+        <div style="flex:1; min-width:0;">
+          <div class="kr-signum" style="margin-bottom:2px;">
+            ${senderLabel} <span style="font-weight:400; color:var(--muted); font-size:11px;">· ${date}</span>
+            ${ideaStatusBadge(idea)}
+          </div>
+          <div style="font-size:13.5px; white-space:pre-wrap;">${idea.text}</div>
+        </div>
+      </div>
+    `;
+  }
   return `
     <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-wrap:wrap;">
       <div style="flex:1; min-width:0;">
-        ${isChefView ? `<div class="kr-signum" style="margin-bottom:2px;">${senderLabel} <span style="font-weight:400; color:var(--muted); font-size:11px;">· ${date}</span>${!idea.is_read ? ` <span class="org-badge" style="background:#fdecec; color:#b3261e;">Ny</span>` : ""}</div>` : `<div class="kr-signum" style="margin-bottom:2px; font-weight:400; color:var(--muted); font-size:11px;">${date}${idea.is_anonymous ? " · Skickad anonymt" : ""}</div>`}
+        <div class="kr-signum" style="margin-bottom:2px; font-weight:400; color:var(--muted); font-size:11px;">${date}${idea.is_anonymous ? " · Skickad anonymt" : ""}</div>
         <div style="font-size:13.5px; white-space:pre-wrap;">${idea.text}</div>
+        ${idea.feedback_text ? `
+          <div style="margin-top:6px; padding:8px; background:var(--green-050); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:var(--green-700); text-transform:uppercase; letter-spacing:0.04em;">Feedback från chefen</div>
+            <div style="font-size:12.5px; margin-top:2px;">${idea.feedback_text}</div>
+          </div>
+          ${idea.medarbetare_svar ? `
+            <div style="margin-top:6px; padding:8px; background:var(--green-100); border-radius:10px;">
+              <div style="font-size:11px; font-weight:700; color:var(--green-700); text-transform:uppercase; letter-spacing:0.04em;">Ditt svar</div>
+              <div style="font-size:12.5px; margin-top:2px;">${idea.medarbetare_svar}</div>
+            </div>
+          ` : `
+            <div style="margin-top:6px;">
+              <textarea class="field-input" id="idea-reply-${idea.id}" style="min-height:44px; font-size:12.5px;" placeholder="Svara chefen..."></textarea>
+              <button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:6px;" onclick="submitIdeaReply('${idea.id}')">Skicka svar</button>
+            </div>
+          `}
+        ` : ""}
       </div>
     </div>
   `;
+}
+
+let ideasCache = [];
+
+function setIdeasTab(tab) {
+  ideasTab = tab;
+  renderIdeasList();
+}
+
+function renderIdeasList() {
+  const user = getCurrentUser();
+  const isChefView = user && user.role === "chef";
+  const listWrap = document.getElementById("ideas-list-wrap");
+  if (!listWrap) return;
+
+  if (isChefView) {
+    document.getElementById("ideas-tab-aktiva").classList.toggle("active", ideasTab === "aktiva");
+    document.getElementById("ideas-tab-hanterade").classList.toggle("active", ideasTab === "hanterade");
+  }
+
+  const relevant = isChefView ? ideasCache : ideasCache.filter(i => i.user_id === user.id);
+  const filtered = isChefView ? relevant.filter(i => ideasTab === "hanterade" ? i.handled : !i.handled) : relevant;
+  const listHtml = filtered.map(i => ideaRowHtml(i, isChefView)).join("");
+
+  listWrap.innerHTML = listHtml
+    ? `<div class="kassa-row-list">${listHtml}</div>`
+    : `<div class="empty-state">${isChefView ? (ideasTab === "hanterade" ? "Inga hanterade idéer ännu." : "Inga nya eller pågående idéer.") : "Inga idéer skickade ännu."}</div>`;
 }
 
 async function renderIdeasView() {
@@ -1098,20 +1226,16 @@ async function renderIdeasView() {
 
   const { data: ideas, error } = await sb.from("ideer").select("*").order("created_at", { ascending: false });
   if (error) { container.innerHTML = `<div class="empty-state">Kunde inte hämta idéer: ${error.message}</div>`; return; }
+  ideasCache = ideas;
 
-  // Chefen "läser" idéerna genom att öppna sidan — det är själva signalen att
-  // knappen ska gå tillbaka till grönt igen.
-  if (isChefView) {
-    const unreadIds = ideas.filter(i => !i.is_read).map(i => i.id);
-    if (unreadIds.length) {
-      await Promise.all(unreadIds.map(id => sb.from("ideer").update({ is_read: true }).eq("id", id)));
-      ideas.forEach(i => { if (unreadIds.includes(i.id)) i.is_read = true; });
+  if (!isChefView) {
+    // Medarbetaren "läser" sin feedback genom att öppna Idélådan.
+    const unseenIds = ideas.filter(i => i.user_id === user.id && i.feedback_text && !i.feedback_sedd).map(i => i.id);
+    if (unseenIds.length) {
+      await Promise.all(unseenIds.map(id => sb.from("ideer").update({ feedback_sedd: true }).eq("id", id)));
+      ideas.forEach(i => { if (unseenIds.includes(i.id)) i.feedback_sedd = true; });
     }
   }
-
-  const listHtml = isChefView
-    ? ideas.map(i => ideaRowHtml(i, true)).join("")
-    : ideas.filter(i => i.user_id === user.id).map(i => ideaRowHtml(i, false)).join("");
 
   container.innerHTML = `
     <div class="field-group">
@@ -1125,9 +1249,107 @@ async function renderIdeasView() {
     <div id="idea-form-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
     <button class="btn-primary" onclick="submitIdea()">Skicka idé</button>
 
-    <div class="kassa-section-title" style="margin-top:24px;">${isChefView ? "Alla idéer" : "Mina idéer"}</div>
-    ${listHtml ? `<div class="kassa-row-list">${listHtml}</div>` : `<div class="empty-state">Inga idéer ${isChefView ? "har kommit in" : "skickade"} ännu.</div>`}
+    ${isChefView ? `
+      <div class="view-toggle" style="margin-top:24px;">
+        <button id="ideas-tab-aktiva" onclick="setIdeasTab('aktiva')">Nya &amp; pågående</button>
+        <button id="ideas-tab-hanterade" onclick="setIdeasTab('hanterade')">Hanterade</button>
+      </div>
+    ` : `<div class="kassa-section-title" style="margin-top:24px;">Mina idéer</div>`}
+    <div id="ideas-list-wrap"></div>
   `;
+  renderIdeasList();
+}
+
+async function openIdeaHandleModal(id) {
+  const idea = ideasCache.find(i => i.id === id);
+  if (!idea) return;
+  const date = new Date(idea.created_at).toLocaleDateString("sv-SE", { day: "numeric", month: "short", year: "numeric" });
+  const senderLabel = idea.is_anonymous ? "Anonym" : idea.signum;
+
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "idea-handle-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${senderLabel} · ${date}</div>
+      <div style="font-size:13.5px; white-space:pre-wrap; margin-bottom:14px;">${idea.text}</div>
+
+      ${idea.feedback_text ? `
+        <div style="margin-bottom:10px; padding:8px; background:var(--green-050); border-radius:10px;">
+          <div style="font-size:11px; font-weight:700; color:var(--green-700); text-transform:uppercase; letter-spacing:0.04em;">Din senaste feedback</div>
+          <div style="font-size:12.5px; margin-top:2px;">${idea.feedback_text}</div>
+        </div>
+      ` : ""}
+      ${idea.medarbetare_svar ? `
+        <div style="margin-bottom:14px; padding:8px; background:#fff3e6; border-radius:10px;">
+          <div style="font-size:11px; font-weight:700; color:#b5590a; text-transform:uppercase; letter-spacing:0.04em;">Medarbetarens svar</div>
+          <div style="font-size:12.5px; margin-top:2px;">${idea.medarbetare_svar}</div>
+        </div>
+      ` : ""}
+
+      <div class="field-group">
+        <label class="field-label">Kommentar (bara du ser den)</label>
+        <textarea class="field-input" id="idea-chef-kommentar" style="min-height:60px;" placeholder="Interna anteckningar...">${idea.chef_kommentar || ""}</textarea>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Feedback till medarbetaren</label>
+        <textarea class="field-input" id="idea-feedback-text" style="min-height:60px;" placeholder="Vad vill du säga tillbaka? Medarbetaren får en notis.">${idea.feedback_text || ""}</textarea>
+      </div>
+      <label class="kassa-check-row" style="border:1px solid var(--line); border-radius:12px; margin-bottom:14px;">
+        <input type="checkbox" id="idea-handled-check" ${idea.handled ? "checked" : ""}>
+        <span class="kassa-check-name" style="font-weight:400;">Markera som hanterad</span>
+      </label>
+      <div id="idea-handle-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitIdeaHandling('${id}')">Spara</button>
+      <button class="btn-secondary" onclick="document.getElementById('idea-handle-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Öppnar och läser -> status blir "Pågående" (om den inte redan är hanterad).
+  if (!idea.is_read) {
+    idea.is_read = true;
+    renderIdeasList();
+    await sb.from("ideer").update({ is_read: true }).eq("id", id);
+  }
+}
+
+async function submitIdeaHandling(id) {
+  const chefKommentar = document.getElementById("idea-chef-kommentar").value.trim();
+  const feedbackText = document.getElementById("idea-feedback-text").value.trim();
+  const isHandled = document.getElementById("idea-handled-check").checked;
+  const errorBox = document.getElementById("idea-handle-error");
+  const idea = ideasCache.find(i => i.id === id);
+  const feedbackChanged = idea && feedbackText && feedbackText !== (idea.feedback_text || "");
+
+  errorBox.textContent = "Sparar…";
+  const patch = { handled: isHandled, is_read: true, chef_kommentar: chefKommentar, feedback_text: feedbackText };
+  if (feedbackChanged) {
+    patch.feedback_at = new Date().toISOString();
+    patch.feedback_sedd = false;
+    patch.medarbetare_svar = ""; // ny feedback öppnar en ny svarsrunda
+  }
+  const { error } = await sb.from("ideer").update(patch).eq("id", id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+
+  const overlay = document.getElementById("idea-handle-overlay");
+  if (overlay) overlay.remove();
+  await renderIdeasView();
+}
+
+async function submitIdeaReply(id) {
+  const input = document.getElementById(`idea-reply-${id}`);
+  const text = (input && input.value || "").trim();
+  if (!text) return;
+  const { error } = await sb.from("ideer").update({
+    medarbetare_svar: text,
+    medarbetare_svar_at: new Date().toISOString(),
+    handled: false, // öppnar idén igen tills chefen hanterar den på nytt
+    is_read: false,
+  }).eq("id", id);
+  if (error) { alert("Kunde inte skicka svaret: " + error.message); return; }
+  await renderIdeasView();
 }
 
 async function submitIdea() {
@@ -1262,8 +1484,19 @@ async function showSchema() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-schema").style.display = "block";
   weekOffset = 0; monthOffset = 0;
-  await Promise.all([loadEventsForCurrentUser(), loadFranvaroCache()]);
+  await Promise.all([loadEventsForCurrentUser(), loadFranvaroCache(), loadPersonalComments()]);
   renderSchema();
+}
+
+let personalCommentsCache = [];
+async function loadPersonalComments() {
+  const user = getCurrentUser();
+  if (!user) { personalCommentsCache = []; return; }
+  const { data, error } = await sb.from("schema_kommentarer").select("*").eq("user_id", user.id);
+  personalCommentsCache = error ? [] : data;
+}
+function personalCommentsForDay(iso) {
+  return personalCommentsCache.filter(c => c.datum === iso);
 }
 async function showHome() {
   document.getElementById("view-schema").style.display = "none";
@@ -1275,6 +1508,7 @@ async function showHome() {
   document.getElementById("view-shared-schema").style.display = "none";
   document.getElementById("view-franvaro").style.display = "none";
   document.getElementById("view-traning").style.display = "none";
+  document.getElementById("view-tasks").style.display = "none";
   document.getElementById("view-home").style.display = "block";
   const user = getCurrentUser();
   if (user) await renderHomeForUser(user);
@@ -1308,14 +1542,17 @@ function renderWeek() {
     const dayEvents = myEvents.filter(e => sameDay(e.start, d));
     const c = consolidateDay(dayEvents);
     const isToday = sameDay(d, today);
-    const absence = user ? absenceOn(user.id, isoDate(d)) : null;
-    html += `<div class="week-row ${isToday ? "today" : ""}">
+    const iso = isoDate(d);
+    const absence = user ? absenceOn(user.id, iso) : null;
+    const hasComments = personalCommentsForDay(iso).length > 0;
+    html += `<div class="week-row ${isToday ? "today" : ""}" onclick="openPersonalDayDetail('${iso}')" style="cursor:pointer;">
       <div class="wd"><div class="name">${dayNames[i].slice(0,3)}</div><div class="num">${d.getDate()}</div></div>
       <div class="status">`;
     if (absence) html += `<div class="time" style="color:#b3261e; font-weight:700;">Sjuk</div>`;
     else if (!c) html += `<div class="time off">Inget schemalagt</div>`;
     else if (c.isOff) html += `<div class="time off">Ledig</div>`;
     else html += `<div class="time">${fmtTime(c.start)}–${fmtTime(c.end)}</div>`;
+    if (hasComments) html += `<div class="comment-badge">💬 Kommentar</div>`;
     html += `</div></div>`;
   });
   html += `</div>`;
@@ -1354,14 +1591,17 @@ function renderMonth() {
       const dayEvents = myEvents.filter(e => sameDay(e.start, d));
       const c = consolidateDay(dayEvents);
       const isToday = sameDay(d, today);
-      const absence = user ? absenceOn(user.id, isoDate(d)) : null;
-      html += `<td>`;
+      const iso = isoDate(d);
+      const absence = user ? absenceOn(user.id, iso) : null;
+      const hasComments = personalCommentsForDay(iso).length > 0;
+      html += `<td onclick="openPersonalDayDetail('${iso}')" style="cursor:pointer;">`;
       html += `<div class="day-num-cell" style="${isToday ? "color:var(--green-700);" : ""} ${inMonth ? "" : "opacity:0.3;"}">${d.getDate()}</div>`;
       html += `<div class="day-cell-inner" style="${inMonth ? "" : "opacity:0.3;"}">`;
       if (absence) html += `<div class="pill" style="background:#fdecec; color:#b3261e; font-weight:700;">Sjuk</div>`;
       else if (c && c.isOff) html += `<div class="pill off">Ledig</div>`;
       else if (c) html += `<div class="pill work">${fmtTime(c.start)}–${fmtTime(c.end)}</div>`;
       else html += `<div class="pill empty">–</div>`;
+      if (hasComments) html += `<div class="comment-badge" style="padding:2px 5px;">💬</div>`;
       html += `</div></td>`;
     }
     html += `</tr>`;
@@ -1370,6 +1610,209 @@ function renderMonth() {
   container.innerHTML = html;
 }
 function changeMonth(delta) { monthOffset += delta; renderMonth(); }
+
+/* ---- Kommentarer i personligt schema ---- */
+const KOMMENTAR_TYP_LABEL = {
+  onskemal: "Önskemål",
+  offentlig: "Offentlig kommentar",
+  personlig: "Personlig kommentar",
+  chef: "Chefkommentar",
+};
+
+function openPersonalDayDetail(iso) {
+  const label = fmtSvFull(iso);
+  const comments = personalCommentsForDay(iso).sort((a, b) => a.created_at.localeCompare(b.created_at));
+
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "personal-day-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${label}</div>
+
+      <div id="personal-day-comments" style="margin-bottom:14px;"></div>
+
+      <div class="field-group">
+        <label class="field-label">Typ av kommentar</label>
+        <select class="field-input" id="personal-comment-typ">
+          <option value="onskemal">Önskemål (chefen får en notis)</option>
+          <option value="offentlig">Offentlig kommentar (syns för alla i Gemensamt schema)</option>
+          <option value="personlig" selected>Personlig kommentar (bara du ser den)</option>
+          <option value="chef">Chefkommentar (chefen ser den)</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <textarea class="field-input" id="personal-comment-text" style="min-height:70px;" placeholder="Skriv din kommentar här..."></textarea>
+      </div>
+      <div id="personal-comment-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitPersonalComment('${iso}')">Spara kommentar</button>
+      <button class="btn-secondary" onclick="document.getElementById('personal-day-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  renderPersonalDayComments(iso);
+}
+
+function renderPersonalDayComments(iso) {
+  const wrap = document.getElementById("personal-day-comments");
+  if (!wrap) return;
+  const comments = personalCommentsForDay(iso).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (!comments.length) { wrap.innerHTML = `<div style="font-size:12.5px; color:var(--muted);">Inga kommentarer för den här dagen än.</div>`; return; }
+  wrap.innerHTML = comments.map(c => `
+    <div style="padding:8px 0; border-bottom:1px solid var(--line);">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;">
+        <span class="org-badge" style="background:var(--green-100);">${KOMMENTAR_TYP_LABEL[c.typ] || c.typ}</span>
+        ${c.typ === "onskemal" ? `<span style="font-size:11px; color:${c.svar_typ ? "var(--green-700)" : "#b5590a"}; font-weight:700;">${c.svar_typ ? "Besvarat" : "Väntar"}</span>` : ""}
+        <button class="kr-delete" onclick="deletePersonalComment('${c.id}', '${iso}')" aria-label="Ta bort">✕</button>
+      </div>
+      <div style="font-size:13px; white-space:pre-wrap; margin-top:2px;">${c.text}</div>
+      ${c.svar_typ ? `
+        <div style="margin-top:6px; padding:8px; background:var(--green-050); border-radius:10px;">
+          <span class="org-badge" style="background:${c.svar_typ === "beviljad" ? "var(--green-100)" : c.svar_typ === "nekad" ? "#fdecec" : "var(--line)"}; color:${c.svar_typ === "beviljad" ? "var(--green-700)" : c.svar_typ === "nekad" ? "#b3261e" : "var(--ink)"};">${ONSKEMAL_SVAR_LABEL[c.svar_typ] || c.svar_typ}</span>
+          ${c.svar_text ? `<div style="font-size:12.5px; margin-top:4px;">${c.svar_text}</div>` : ""}
+        </div>
+      ` : ""}
+    </div>
+  `).join("");
+}
+
+async function submitPersonalComment(iso) {
+  const typ = document.getElementById("personal-comment-typ").value;
+  const text = document.getElementById("personal-comment-text").value.trim();
+  const errorBox = document.getElementById("personal-comment-error");
+  if (!text) { errorBox.textContent = "Skriv något innan du sparar."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("schema_kommentarer").insert({ datum: iso, user_id: user.id, signum: user.signum, text, typ });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  document.getElementById("personal-comment-text").value = "";
+  errorBox.textContent = "";
+  await loadPersonalComments();
+  renderPersonalDayComments(iso);
+  renderSchema();
+}
+
+async function deletePersonalComment(id, iso) {
+  const { error } = await sb.from("schema_kommentarer").delete().eq("id", id);
+  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+  await loadPersonalComments();
+  renderPersonalDayComments(iso);
+  renderSchema();
+}
+
+/* ---- Önskemål: notis till chef ---- */
+let lastPendingOnskemal = [];
+let lastPendingFriskanmalningar = [];
+let lastAllProfilesForToday = [];
+let lastUnseenOnskemalSvar = [];
+
+/* Medarbetaren ser en notis när chefen har svarat på ett önskemål —
+   försvinner först när personen aktivt kvitterat den. */
+async function loadUnseenOnskemalSvar() {
+  const user = getCurrentUser();
+  if (!user) return [];
+  const { data, error } = await sb.from("schema_kommentarer")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("typ", "onskemal")
+    .eq("svar_sedd", false);
+  if (error) return [];
+  return (data || []).filter(c => c.svar_typ);
+}
+
+function openOnskemalSvarModal(items) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "onskemal-svar-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  const rows = items.map(item => `
+    <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-direction:column; gap:4px;">
+      <div style="font-size:11px; color:var(--muted); font-weight:700;">${fmtSvFull(item.datum)}</div>
+      <div style="font-size:13px;"><b>Ditt önskemål:</b> ${item.text}</div>
+      <span class="org-badge" style="background:${item.svar_typ === "beviljad" ? "var(--green-100)" : item.svar_typ === "nekad" ? "#fdecec" : "var(--line)"}; color:${item.svar_typ === "beviljad" ? "var(--green-700)" : item.svar_typ === "nekad" ? "#b3261e" : "var(--ink)"};">${ONSKEMAL_SVAR_LABEL[item.svar_typ] || item.svar_typ}</span>
+      ${item.svar_text ? `<div style="font-size:13px; margin-top:2px;">${item.svar_text}</div>` : ""}
+      <button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:6px;" onclick="markOnskemalSvarSeen('${item.id}')">OK, jag har sett</button>
+    </div>
+  `).join("");
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Svar på dina önskemål</div>
+      <div class="kassa-row-list">${rows}</div>
+      <button class="btn-secondary" onclick="document.getElementById('onskemal-svar-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function markOnskemalSvarSeen(id) {
+  const { error } = await sb.from("schema_kommentarer").update({ svar_sedd: true }).eq("id", id);
+  if (error) { alert("Kunde inte kvittera: " + error.message); return; }
+  const overlay = document.getElementById("onskemal-svar-overlay");
+  if (overlay) overlay.remove();
+  const items = await loadUnseenOnskemalSvar();
+  if (items.length) openOnskemalSvarModal(items);
+  await renderTodayWidget(getCurrentUser());
+}
+
+async function loadPendingOnskemal() {
+  if (!isChef()) return [];
+  const { data, error } = await sb.from("schema_kommentarer").select("*").eq("typ", "onskemal").eq("handled", false);
+  return error ? [] : data;
+}
+
+function openOnskemalModal(items, allProfiles) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "onskemal-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  const rows = items.map(item => {
+    const profile = allProfiles.find(p => p.id === item.user_id);
+    const dateLabel = fmtSvFull(item.datum);
+    return `
+      <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-wrap:wrap; flex-direction:column; gap:8px;">
+        <div style="width:100%;">
+          <div style="font-weight:700;">${profile ? profile.name : item.signum} <span style="color:var(--muted); font-weight:400; font-size:11px;">· ${dateLabel}</span></div>
+          <div style="font-size:13px; margin-top:2px;">${item.text}</div>
+        </div>
+        <textarea class="field-input" id="onskemal-svar-${item.id}" style="min-height:50px; font-size:12.5px;" placeholder="Kommentar till ditt svar (valfritt)"></textarea>
+        <div style="display:flex; gap:6px; width:100%;">
+          <button class="btn-secondary" style="width:auto; flex:1; padding:8px; margin-top:0; background:var(--green-100); border-color:var(--green-300); color:var(--green-700);" onclick="submitOnskemalSvar('${item.id}', 'beviljad')">Bevilja</button>
+          <button class="btn-secondary" style="width:auto; flex:1; padding:8px; margin-top:0; background:#fdecec; border-color:#f3b9b9; color:#b3261e;" onclick="submitOnskemalSvar('${item.id}', 'nekad')">Neka</button>
+          <button class="btn-secondary" style="width:auto; flex:1; padding:8px; margin-top:0;" onclick="submitOnskemalSvar('${item.id}', 'nytt_forslag')">Nytt förslag</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Önskemål att hantera</div>
+      <div class="kassa-row-list">${rows || `<div class="empty-state">Inga fler önskemål väntar.</div>`}</div>
+      <button class="btn-secondary" onclick="document.getElementById('onskemal-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+const ONSKEMAL_SVAR_LABEL = { beviljad: "Beviljat", nekad: "Nekat", nytt_forslag: "Nytt förslag" };
+
+async function submitOnskemalSvar(id, svarTyp) {
+  const svarText = (document.getElementById(`onskemal-svar-${id}`) || {}).value || "";
+  const { error } = await sb.from("schema_kommentarer").update({
+    handled: true,
+    svar_typ: svarTyp,
+    svar_text: svarText.trim(),
+    svar_at: new Date().toISOString(),
+    svar_sedd: false,
+  }).eq("id", id);
+  if (error) { alert("Kunde inte spara svaret: " + error.message); return; }
+  const overlay = document.getElementById("onskemal-overlay");
+  if (overlay) overlay.remove();
+  const items = await loadPendingOnskemal();
+  const allProfiles = await fetchProfiles();
+  if (items.length) openOnskemalModal(items, allProfiles);
+  await renderTodayWidget(getCurrentUser());
+}
 
 /* ---- Gemensamt schema (alla roller ser allas scheman) ---- */
 let sharedSchedules = []; // [{ profile, events }]
@@ -1400,7 +1843,7 @@ async function loadSharedDayComments() {
 }
 
 function commentsForDay(dateIso) {
-  return sharedDayComments.filter(c => c.datum === dateIso);
+  return sharedDayComments.filter(c => c.datum === dateIso && c.typ === "offentlig");
 }
 
 /* ---- Frånvaro ---- */
@@ -1491,6 +1934,8 @@ function franvaroRowHtml(f) {
   const range = f.forsta_dag === f.planerad_atokomst
     ? fmtSvShort(f.forsta_dag)
     : `${fmtSvShort(f.forsta_dag)} – ${fmtSvShort(f.planerad_atokomst)}`;
+  const todayIso = isoDate(new Date());
+  const kanFriskanmala = f.planerad_atokomst >= todayIso && !f.frisk_anmald;
   return `
     <div class="kassa-row" style="cursor:default; align-items:flex-start;">
       <div style="flex:1; min-width:0;">
@@ -1498,10 +1943,113 @@ function franvaroRowHtml(f) {
         ${f.orsak ? `<div style="font-size:12.5px; color:var(--muted); margin-top:2px;">${f.orsak}</div>` : ""}
         ${f.har_kontaktat_chef ? `<div style="font-size:11px; color:var(--muted); margin-top:2px;">✔ Chef kontaktad</div>` : ""}
         ${f.har_sjukintyg ? `<div style="font-size:11px; color:var(--muted); margin-top:2px;">✔ Sjukintyg bekräftat</div>` : ""}
+        ${f.frisk_anmald ? `<div style="font-size:11px; color:${f.frisk_hanterad ? "var(--green-700)" : "#b5590a"}; font-weight:700; margin-top:2px;">🩺 Friskanmäld, tillbaka ${fmtSvShort(f.frisk_datum)} ${f.frisk_hanterad ? "· Bekräftat" : "· Väntar på chef"}</div>` : ""}
+        ${kanFriskanmala ? `<button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:8px;" onclick="declareRecovery('${f.id}')">✅ Jag är frisk</button>` : ""}
       </div>
       <button class="kr-edit" onclick="editFranvaro('${f.id}')" aria-label="Redigera">✎</button>
     </div>
   `;
+}
+
+/* ---- Friskanmälan ---- */
+function declareRecovery(id) {
+  const f = franvaroCache.find(x => x.id === id);
+  if (!f) return;
+  franvaroRecoveryDraft = { id: f.id, datum: isoDate(new Date()) };
+  renderFranvaroRecoveryModal();
+}
+
+function closeFranvaroRecovery() {
+  franvaroRecoveryDraft = null;
+  const overlay = document.getElementById("franvaro-recovery-overlay");
+  if (overlay) overlay.remove();
+}
+
+function renderFranvaroRecoveryModal() {
+  const d = franvaroRecoveryDraft;
+  let overlay = document.getElementById("franvaro-recovery-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "franvaro-recovery-overlay";
+    overlay.className = "kassa-modal-overlay";
+    overlay.onclick = (ev) => { if (ev.target === overlay) closeFranvaroRecovery(); };
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Jag är frisk</div>
+      <div class="kassa-modal-note" style="margin-top:0;">Välj vilken dag du är tillbaka på jobbet. Chefen får en notis som ligger kvar tills den bekräftas.</div>
+      <div class="field-group">
+        <label class="field-label">Tillbaka datum</label>
+        <button type="button" class="field-input kassa-date-btn" onclick="openFranvaroDatePicker('datum', 'recovery')">${fmtSvFull(d.datum)}</button>
+      </div>
+      <div id="franvaro-recovery-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitFranvaroRecovery()">Skicka</button>
+      <button class="btn-secondary" onclick="closeFranvaroRecovery()">Avbryt</button>
+    </div>
+  `;
+}
+
+async function submitFranvaroRecovery() {
+  const d = franvaroRecoveryDraft;
+  const errorBox = document.getElementById("franvaro-recovery-error");
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("franvaro").update({
+    planerad_atokomst: d.datum,
+    frisk_anmald: true,
+    frisk_datum: d.datum,
+    frisk_hanterad: false,
+    frisk_anmald_at: new Date().toISOString(),
+  }).eq("id", d.id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  closeFranvaroRecovery();
+  await loadFranvaroCache();
+  renderFranvaroView();
+}
+
+async function loadPendingFriskanmalningar() {
+  if (!isChef()) return [];
+  const { data, error } = await sb.from("franvaro").select("*").eq("frisk_anmald", true).eq("frisk_hanterad", false);
+  return error ? [] : data;
+}
+
+function openFriskanmalningModal(items, allProfiles) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "friskanmalning-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  const rows = items.map(item => {
+    const profile = allProfiles.find(p => p.id === item.user_id);
+    return `
+      <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:700;">${profile ? profile.name : item.signum}</div>
+          <div style="font-size:12.5px; margin-top:2px;">Tillbaka: <b>${fmtSvFull(item.frisk_datum)}</b></div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">Ursprunglig frånvaro: ${fmtSvShort(item.forsta_dag)} – ${fmtSvShort(item.planerad_atokomst)}</div>
+        </div>
+        <button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:0;" onclick="handleFriskanmalning('${item.id}')">Bekräfta</button>
+      </div>
+    `;
+  }).join("");
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Friskanmälningar</div>
+      <div class="kassa-row-list">${rows || `<div class="empty-state">Inga fler väntar.</div>`}</div>
+      <button class="btn-secondary" onclick="document.getElementById('friskanmalning-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function handleFriskanmalning(id) {
+  const { error } = await sb.from("franvaro").update({ frisk_hanterad: true }).eq("id", id);
+  if (error) { alert("Kunde inte bekräfta: " + error.message); return; }
+  const overlay = document.getElementById("friskanmalning-overlay");
+  if (overlay) overlay.remove();
+  const items = await loadPendingFriskanmalningar();
+  const allProfiles = await fetchProfiles();
+  if (items.length) openFriskanmalningModal(items, allProfiles);
+  await renderTodayWidget(getCurrentUser());
 }
 
 function editFranvaro(id) {
@@ -1617,13 +2165,20 @@ async function submitFranvaro() {
 let franvaroPickerField = null;
 let franvaroPickerViewYear = null;
 let franvaroPickerViewMonth = null;
-let franvaroPickerIsEdit = false;
+let franvaroPickerMode = "new"; // "new" | "edit" | "recovery"
 let franvaroEditDraft = null; // satt när man redigerar en befintlig anmälan, annars null
+let franvaroRecoveryDraft = null; // satt när man friskanmäler sig, annars null
 
-function openFranvaroDatePicker(fieldKey, isEdit) {
+function franvaroActiveDraft() {
+  if (franvaroPickerMode === "edit") return franvaroEditDraft;
+  if (franvaroPickerMode === "recovery") return franvaroRecoveryDraft;
+  return franvaroDraft;
+}
+
+function openFranvaroDatePicker(fieldKey, mode) {
   franvaroPickerField = fieldKey;
-  franvaroPickerIsEdit = !!isEdit;
-  const draft = franvaroPickerIsEdit ? franvaroEditDraft : franvaroDraft;
+  franvaroPickerMode = mode === true ? "edit" : (mode || "new");
+  const draft = franvaroActiveDraft();
   const current = draft[fieldKey];
   let y, m;
   if (current) { [y, m] = current.split("-").map(Number); m -= 1; }
@@ -1643,10 +2198,12 @@ function changeFranvaroPickerMonth(delta) {
   renderFranvaroDatePicker();
 }
 function selectFranvaroDate(iso) {
-  const draft = franvaroPickerIsEdit ? franvaroEditDraft : franvaroDraft;
+  const draft = franvaroActiveDraft();
   draft[franvaroPickerField] = iso;
   closeFranvaroDatePicker();
-  if (franvaroPickerIsEdit) renderFranvaroEditModal(); else renderFranvaroView();
+  if (franvaroPickerMode === "edit") renderFranvaroEditModal();
+  else if (franvaroPickerMode === "recovery") renderFranvaroRecoveryModal();
+  else renderFranvaroView();
 }
 function renderFranvaroDatePicker() {
   const year = franvaroPickerViewYear, month = franvaroPickerViewMonth;
@@ -1658,7 +2215,7 @@ function renderFranvaroDatePicker() {
   while (cursor <= gridEnd) { const week = []; for (let i = 0; i < 7; i++) { week.push(new Date(cursor)); cursor.setDate(cursor.getDate() + 1); } weeks.push(week); }
   const monthLabel = new Date(year, month, 1).toLocaleDateString("sv-SE", { month: "long", year: "numeric" }).replace(/^./, c => c.toUpperCase());
   const dayNames = ["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"];
-  const selected = (franvaroPickerIsEdit ? franvaroEditDraft : franvaroDraft)[franvaroPickerField];
+  const selected = franvaroActiveDraft()[franvaroPickerField];
   const today = new Date();
 
   let overlay = document.getElementById("franvaro-datepicker-overlay");
@@ -2060,6 +2617,238 @@ function deleteTraning(id, titel) {
   };
 }
 
+/* ---- Tilldela uppgift (riktad uppgift mot en person, med deadline + prioritet) ---- */
+const PRIORITET_LABEL = { rod: "Hög", gul: "Medel", gron: "Låg" };
+let taskAssignCache = [];
+let taskAssignAllProfiles = [];
+let taskAssignDraft = null;
+
+function emptyTaskAssignDraft() {
+  return { targetUserId: "", text: "", deadline: isoDate(new Date()), prioritet: "gul" };
+}
+
+async function loadTaskAssignments() {
+  const [profilesRes, tasksRes] = await Promise.all([
+    fetchProfiles(),
+    sb.from("tilldelade_uppgifter").select("*").order("deadline", { ascending: true }),
+  ]);
+  taskAssignAllProfiles = profilesRes;
+  taskAssignCache = tasksRes.data || [];
+}
+
+async function showTasks() {
+  document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-tasks").style.display = "block";
+  taskAssignDraft = emptyTaskAssignDraft();
+  await loadTaskAssignments();
+  renderTasksView();
+}
+
+function renderTasksView() {
+  const container = document.getElementById("tasks-results");
+  const user = getCurrentUser();
+  const chef = isChef();
+  const d = taskAssignDraft;
+
+  const formHtml = chef ? `
+    <div class="kassa-section-title">Ny uppgift</div>
+    <div class="field-group">
+      <label class="field-label">Användare</label>
+      <select class="field-input" id="task-target-user" onchange="taskAssignDraft.targetUserId = this.value">
+        <option value="">Välj person</option>
+        ${taskAssignAllProfiles.map(p => `<option value="${p.id}" ${d.targetUserId === p.id ? "selected" : ""}>${p.name}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Deadline</label>
+      <button type="button" class="field-input kassa-date-btn" onclick="openTaskDatePicker()">${fmtSvFull(d.deadline)}</button>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Uppgift</label>
+      <textarea class="field-input" id="task-text" style="min-height:70px;" placeholder="Vad ska göras?" oninput="taskAssignDraft.text = this.value">${d.text}</textarea>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Prioritet</label>
+      <div style="display:flex; gap:8px;">
+        ${["rod", "gul", "gron"].map(p => `
+          <button type="button" onclick="taskAssignDraft.prioritet = '${p}'; renderTasksView();"
+            style="flex:1; padding:10px; border-radius:12px; border:2px solid ${d.prioritet === p ? "var(--green-700)" : "var(--line)"}; background:${d.prioritet === p ? "var(--green-050)" : "var(--white)"}; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12.5px; font-weight:700;">
+            <span class="priority-dot ${p}"></span>${PRIORITET_LABEL[p]}
+          </button>
+        `).join("")}
+      </div>
+    </div>
+    <div id="task-form-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:10px 0 8px;"></div>
+    <button class="btn-primary" onclick="submitTaskAssignment()">Tilldela uppgift</button>
+  ` : "";
+
+  const relevant = chef ? taskAssignCache : taskAssignCache.filter(t => t.target_user_id === user.id);
+  const sorted = [...relevant].sort((a, b) => {
+    if (a.is_done !== b.is_done) return a.is_done ? 1 : -1;
+    const order = { rod: 0, gul: 1, gron: 2 };
+    if (order[a.prioritet] !== order[b.prioritet]) return order[a.prioritet] - order[b.prioritet];
+    return a.deadline.localeCompare(b.deadline);
+  });
+
+  const listHtml = sorted.length ? sorted.map(t => {
+    const profile = taskAssignAllProfiles.find(p => p.id === t.target_user_id);
+    return `
+      <div class="kassa-row" style="align-items:flex-start; flex-wrap:wrap;">
+        <input type="checkbox" ${t.is_done ? "checked" : ""} onchange="toggleTaskAssignmentDone('${t.id}', this.checked)" style="margin-top:2px;">
+        <div style="flex:1; min-width:0; margin-left:8px;">
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span class="priority-badge ${t.prioritet}"><span class="priority-dot ${t.prioritet}"></span>${PRIORITET_LABEL[t.prioritet]}</span>
+            ${chef ? `<span style="font-size:11px; color:var(--muted);">${profile ? profile.name : "Okänd"}</span>` : ""}
+            <span style="font-size:11px; color:var(--muted);">Deadline: ${fmtSvShort(t.deadline)}</span>
+          </div>
+          <div style="font-size:13.5px; margin-top:3px; ${t.is_done ? "text-decoration:line-through; color:var(--muted);" : ""}">${t.text}</div>
+        </div>
+        ${chef ? `<button class="kr-delete" onclick="deleteTaskAssignment('${t.id}')" aria-label="Ta bort">✕</button>` : ""}
+      </div>
+    `;
+  }).join("") : `<div class="empty-state">Inga uppgifter ${chef ? "tilldelade ännu" : "väntar på dig"}.</div>`;
+
+  container.innerHTML = `
+    ${formHtml}
+    <div class="kassa-section-title" style="margin-top:${chef ? "24px" : "0"};">${chef ? "Alla tilldelade uppgifter" : "Mina uppgifter"}</div>
+    <div class="kassa-row-list">${listHtml}</div>
+  `;
+}
+
+async function submitTaskAssignment() {
+  const d = taskAssignDraft;
+  const errorBox = document.getElementById("task-form-error");
+  if (!d.targetUserId) { errorBox.textContent = "Välj vem uppgiften ska gå till."; return; }
+  if (!d.text.trim()) { errorBox.textContent = "Skriv vad uppgiften gäller."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("tilldelade_uppgifter").insert({
+    target_user_id: d.targetUserId, text: d.text.trim(), deadline: d.deadline, prioritet: d.prioritet, created_by: user.id,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  taskAssignDraft = emptyTaskAssignDraft();
+  await loadTaskAssignments();
+  renderTasksView();
+}
+
+async function toggleTaskAssignmentDone(id, checked) {
+  const { error } = await sb.from("tilldelade_uppgifter").update({ is_done: checked }).eq("id", id);
+  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
+  await loadTaskAssignments();
+  renderTasksView();
+}
+
+async function completePinnedTask(id, checked) {
+  const { error } = await sb.from("tilldelade_uppgifter").update({ is_done: checked }).eq("id", id);
+  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
+  await renderTodayWidget(getCurrentUser());
+}
+
+
+function deleteTaskAssignment(id) {
+  const task = taskAssignCache.find(t => t.id === id);
+  const profile = task && taskAssignAllProfiles.find(p => p.id === task.target_user_id);
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "task-delete-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Ta bort uppgift?</div>
+      <div class="kassa-modal-note" style="margin-top:0;">
+        Uppgiften${profile ? ` till <strong>${profile.name}</strong>` : ""} tas bort permanent och försvinner direkt hos mottagaren. Det går inte att ångra.
+      </div>
+      <button class="btn-primary off" id="task-confirm-delete-btn">Ta bort</button>
+      <button class="btn-secondary" onclick="document.getElementById('task-delete-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById("task-confirm-delete-btn").onclick = async () => {
+    const { error } = await sb.from("tilldelade_uppgifter").delete().eq("id", id);
+    overlay.remove();
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    await loadTaskAssignments();
+    renderTasksView();
+  };
+}
+
+/* Egen Monday-först-kalender för deadline, samma mönster som övriga formulär. */
+let taskPickerViewYear = null;
+let taskPickerViewMonth = null;
+
+function openTaskDatePicker() {
+  const current = taskAssignDraft.deadline;
+  let y, m;
+  if (current) { [y, m] = current.split("-").map(Number); m -= 1; }
+  else { const t = new Date(); y = t.getFullYear(); m = t.getMonth(); }
+  taskPickerViewYear = y;
+  taskPickerViewMonth = m;
+  renderTaskDatePicker();
+}
+function closeTaskDatePicker() {
+  const overlay = document.getElementById("task-datepicker-overlay");
+  if (overlay) overlay.remove();
+}
+function changeTaskPickerMonth(delta) {
+  taskPickerViewMonth += delta;
+  if (taskPickerViewMonth < 0) { taskPickerViewMonth = 11; taskPickerViewYear--; }
+  if (taskPickerViewMonth > 11) { taskPickerViewMonth = 0; taskPickerViewYear++; }
+  renderTaskDatePicker();
+}
+function selectTaskDate(iso) {
+  taskAssignDraft.deadline = iso;
+  closeTaskDatePicker();
+  renderTasksView();
+}
+function renderTaskDatePicker() {
+  const year = taskPickerViewYear, month = taskPickerViewMonth;
+  const firstOfMonth = new Date(year, month, 1);
+  const gridStart = startOfWeek(firstOfMonth);
+  const lastOfMonth = new Date(year, month + 1, 0);
+  const gridEnd = startOfWeek(lastOfMonth); gridEnd.setDate(gridEnd.getDate() + 6);
+  const weeks = []; let cursor = new Date(gridStart);
+  while (cursor <= gridEnd) { const week = []; for (let i = 0; i < 7; i++) { week.push(new Date(cursor)); cursor.setDate(cursor.getDate() + 1); } weeks.push(week); }
+  const monthLabel = new Date(year, month, 1).toLocaleDateString("sv-SE", { month: "long", year: "numeric" }).replace(/^./, c => c.toUpperCase());
+  const dayNames = ["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"];
+  const selected = taskAssignDraft.deadline;
+  const today = new Date();
+
+  let overlay = document.getElementById("task-datepicker-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "task-datepicker-overlay";
+    overlay.className = "kassa-modal-overlay";
+    overlay.onclick = (ev) => { if (ev.target === overlay) closeTaskDatePicker(); };
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="nav-row" style="margin-bottom:12px;">
+        <button class="icon-btn" type="button" onclick="changeTaskPickerMonth(-1)">‹</button>
+        <div class="label">${monthLabel}</div>
+        <button class="icon-btn" type="button" onclick="changeTaskPickerMonth(1)">›</button>
+      </div>
+      <div class="kassa-cal-headers">
+        ${dayNames.map(n => `<div class="kassa-cal-headcell">${n}</div>`).join("")}
+      </div>
+      ${weeks.map(week => `
+        <div class="kassa-cal-row">
+          ${week.map(dt => {
+            const iso = isoDate(dt);
+            const inMonth = dt.getMonth() === month;
+            const isSelected = iso === selected;
+            const isToday = sameDay(dt, today);
+            const isMon = dt.getDay() === 1;
+            return `<button type="button" class="kassa-cal-cell ${inMonth ? "" : "muted"} ${isSelected ? "selected" : ""} ${isToday && !isSelected ? "today" : ""} ${isMon ? "mon" : ""}" onclick="selectTaskDate('${iso}')">${dt.getDate()}</button>`;
+          }).join("")}
+        </div>
+      `).join("")}
+      <button class="btn-secondary" type="button" onclick="closeTaskDatePicker()">Avbryt</button>
+    </div>
+  `;
+}
+
 async function showSharedSchema() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-shared-schema").style.display = "block";
@@ -2233,7 +3022,7 @@ function renderSharedMonth() {
       } else {
         html += `<div class="pill empty">–</div>`;
       }
-      if (hasComments) html += `<div style="font-size:11px; margin-top:2px;">💬</div>`;
+      if (hasComments) html += `<div class="comment-badge" style="padding:2px 5px;">💬</div>`;
       html += `</div></td>`;
     }
     html += `</tr>`;
@@ -2334,7 +3123,7 @@ async function submitSharedDayComment(iso) {
   if (!text) { errorBox.textContent = "Skriv något innan du lägger till."; return; }
   const user = getCurrentUser();
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("schema_kommentarer").insert({ datum: iso, user_id: user.id, signum: user.signum, text });
+  const { error } = await sb.from("schema_kommentarer").insert({ datum: iso, user_id: user.id, signum: user.signum, text, typ: "offentlig" });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   document.getElementById("shared-day-comment-text").value = "";
   errorBox.textContent = "";
@@ -2361,6 +3150,14 @@ async function renderTodayWidget(user) {
   await loadSharedSchedules();
   await loadFranvaroCache();
   const allProfilesForToday = await fetchProfiles();
+  const { data: myPinnedTasks } = await sb.from("tilldelade_uppgifter").select("*").eq("target_user_id", user.id).eq("is_done", false).order("deadline", { ascending: true });
+  const pendingOnskemal = user.role === "chef" ? await loadPendingOnskemal() : [];
+  const pendingFriskanmalningar = user.role === "chef" ? await loadPendingFriskanmalningar() : [];
+  lastPendingFriskanmalningar = pendingFriskanmalningar;
+  lastPendingOnskemal = pendingOnskemal;
+  lastAllProfilesForToday = allProfilesForToday;
+  const unseenOnskemalSvar = await loadUnseenOnskemalSvar();
+  lastUnseenOnskemalSvar = unseenOnskemalSvar;
   const workingToday = sharedSchedules
     .filter(({ events }) => {
       const c = consolidateDay(events.filter(e => sameDay(e.start, new Date())));
@@ -2389,7 +3186,38 @@ async function renderTodayWidget(user) {
 
   wrap.innerHTML = `
     <div class="today-card">
+      ${myPinnedTasks && myPinnedTasks.length ? `
+        <div style="margin-bottom:12px;">
+          ${myPinnedTasks.map(t => `
+            <div style="display:flex; align-items:flex-start; gap:8px; background:${t.prioritet === "rod" ? "#fdecec" : t.prioritet === "gul" ? "#fff3d6" : "var(--green-050)"}; border:1px solid ${t.prioritet === "rod" ? "#f3b9b9" : t.prioritet === "gul" ? "#f0dba3" : "var(--green-300)"}; border-radius:12px; padding:10px 12px; margin-bottom:6px;">
+              <input type="checkbox" onchange="completePinnedTask('${t.id}', this.checked)" style="margin-top:2px;">
+              <div style="flex:1; min-width:0;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span class="priority-dot ${t.prioritet}"></span>
+                  <span style="font-size:11px; font-weight:700; color:var(--muted);">Deadline: ${fmtSvShort(t.deadline)}</span>
+                </div>
+                <div style="font-size:13px; font-weight:600; margin-top:2px;">${t.text}</div>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
       <div class="today-date">${dateLabel}</div>
+      ${pendingOnskemal.length ? `
+        <div onclick="openOnskemalModal(lastPendingOnskemal, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:8px 12px; margin-bottom:12px; font-size:12.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+          📋 ${pendingOnskemal.length} önskemål väntar — tryck för att hantera
+        </div>
+      ` : ""}
+      ${pendingFriskanmalningar.length ? `
+        <div onclick="openFriskanmalningModal(lastPendingFriskanmalningar, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:8px 12px; margin-bottom:12px; font-size:12.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+          🩺 ${pendingFriskanmalningar.length} friskanmälan${pendingFriskanmalningar.length === 1 ? "" : "ar"} väntar — tryck för att bekräfta
+        </div>
+      ` : ""}
+      ${unseenOnskemalSvar.length ? `
+        <div onclick="openOnskemalSvarModal(lastUnseenOnskemalSvar)" style="cursor:pointer; background:var(--green-100); border:1px solid var(--green-300); border-radius:12px; padding:8px 12px; margin-bottom:12px; font-size:12.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
+          ✅ Chefen har svarat på ${unseenOnskemalSvar.length === 1 ? "ditt önskemål" : `${unseenOnskemalSvar.length} önskemål`} — tryck för att se
+        </div>
+      ` : ""}
       <div class="today-working">
         ${todayPeople.length
           ? todayPeople.map(({ profile, absent }) => `
@@ -2555,7 +3383,7 @@ function emptyKassaDraft() {
   yesterday.setDate(yesterday.getDate() - 1);
   const toISO = (d) => d.toISOString().slice(0, 10);
   const currentSignum = (getCurrentUser() || {}).signum || "—";
-  return { redovisatDatum: toISO(today), forsaljningDatum: toISO(yesterday), kassadifferens: "", signum: currentSignum, anteckning: "", checkedRegisters: {} };
+  return { redovisatDatum: toISO(today), forsaljningDatum: toISO(yesterday), kassadifferens: "", kassadifferensNegative: false, signum: currentSignum, anteckning: "", checkedRegisters: {} };
 }
 function num(v) { const n = parseFloat(String(v).replace(",", ".")); return isNaN(n) ? 0 : n; }
 function fmtKr(n) { return n.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " kr"; }
@@ -2622,7 +3450,10 @@ function renderKassaForm() {
 
     <div class="field-group">
       <label class="field-label">Kassadifferens</label>
-      <input class="field-input" type="number" inputmode="decimal" placeholder="0.00" value="${d.kassadifferens}" oninput="kassaDraft.kassadifferens = this.value; updateKassaDiffBox();">
+      <div style="display:flex; gap:8px;">
+        <button type="button" id="kassa-diff-sign-btn" onclick="toggleKassaDiffSign()" style="flex-shrink:0; width:46px; border-radius:12px; font-size:20px; font-weight:800; cursor:pointer;" aria-label="Byt tecken"></button>
+        <input class="field-input" id="kassa-diff-input" type="number" inputmode="decimal" placeholder="0.00" value="${d.kassadifferens}" oninput="kassaDraft.kassadifferens = this.value; kassaDraft.kassadifferensNegative = num(this.value) < 0; updateKassaDiffSignBtn(); updateKassaDiffBox();">
+      </div>
     </div>
 
     <div class="field-group">
@@ -2643,6 +3474,7 @@ function renderKassaForm() {
     <div id="kassa-form-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-top:8px;"></div>
   `;
   updateKassaDiffBox();
+  updateKassaDiffSignBtn();
   updateKassaChecklistVisibility();
 }
 
@@ -2777,6 +3609,28 @@ function updateKassaChecklistStatus() {
   if (saveBtn) saveBtn.disabled = !allChecked;
   const status = document.getElementById("kassa-checklist-status");
   if (status) status.textContent = `${checkedCount} av ${KASSA_REGISTERS.length} kassor avprickade`;
+}
+
+function updateKassaDiffSignBtn() {
+  const btn = document.getElementById("kassa-diff-sign-btn");
+  if (!btn) return;
+  const neg = !!kassaDraft.kassadifferensNegative;
+  btn.textContent = neg ? "−" : "+";
+  btn.style.background = neg ? "#fdecec" : "var(--green-100)";
+  btn.style.color = neg ? "#b3261e" : "var(--green-700)";
+  btn.style.border = `2px solid ${neg ? "#f3b9b9" : "var(--green-300)"}`;
+}
+
+function toggleKassaDiffSign() {
+  kassaDraft.kassadifferensNegative = !kassaDraft.kassadifferensNegative;
+  if (kassaDraft.kassadifferens !== "") {
+    const magnitude = Math.abs(num(kassaDraft.kassadifferens));
+    kassaDraft.kassadifferens = String(kassaDraft.kassadifferensNegative ? -magnitude : magnitude);
+    const input = document.getElementById("kassa-diff-input");
+    if (input) input.value = kassaDraft.kassadifferens;
+  }
+  updateKassaDiffSignBtn();
+  updateKassaDiffBox();
 }
 
 function updateKassaDiffBox() {
