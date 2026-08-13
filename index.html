@@ -2316,10 +2316,9 @@ function renderTraning() {
   else renderTraningHistorik();
 }
 
-/* ---- Ny träning (chef) ---- */
+/* ---- Ny träning (alla roller) ---- */
 function renderTraningNy() {
   const container = document.getElementById("traning-results");
-  if (!isChef()) { container.innerHTML = `<div class="empty-state">Bara chefer kan skapa nya träningar.</div>`; return; }
   if (!traningNyDraft) traningNyDraft = emptyTraningDraft();
   const d = traningNyDraft;
 
