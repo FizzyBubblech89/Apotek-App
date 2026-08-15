@@ -88,21 +88,21 @@
   /* ---- Today widget (home screen) ---- */
   .today-card {
     background: var(--white); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow);
-    padding: 16px 16px 4px; margin-bottom: 22px;
+    padding: 12px 14px 4px; margin-bottom: 16px;
   }
-  .today-date { font-size: 13px; font-weight: 700; color: var(--green-700); text-transform: capitalize; margin-bottom: 10px; }
-  .today-working { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .today-date { font-size: 12.5px; font-weight: 700; color: var(--green-700); text-transform: capitalize; margin-bottom: 7px; }
+  .today-working { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
   .today-chip {
-    display: flex; align-items: center; gap: 5px; background: var(--green-100); color: var(--green-700);
-    border-radius: 999px; padding: 4px 10px 4px 4px; font-size: 11.5px; font-weight: 700;
+    display: flex; align-items: center; gap: 4px; background: var(--green-100); color: var(--green-700);
+    border-radius: 999px; padding: 3px 8px 3px 3px; font-size: 10.5px; font-weight: 700;
   }
   .today-chip-avatar {
-    width: 20px; height: 20px; border-radius: 50%; background: var(--green-700); color: var(--white);
-    display: flex; align-items: center; justify-content: center; font-size: 9.5px; overflow: hidden; flex-shrink: 0;
+    width: 18px; height: 18px; border-radius: 50%; background: var(--green-700); color: var(--white);
+    display: flex; align-items: center; justify-content: center; font-size: 8.5px; overflow: hidden; flex-shrink: 0;
   }
   .today-chip-avatar img { width: 100%; height: 100%; object-fit: cover; }
-  .today-task-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
-  .today-task-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--green-700); margin-top: 2px; flex-shrink: 0; }
+  .today-task-row { display: flex; align-items: flex-start; gap: 7px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 12px; }
+  .today-task-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--green-700); margin-top: 2px; flex-shrink: 0; }
   .today-task-row.done span { text-decoration: line-through; color: var(--muted); }
   .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .nav-card {
@@ -622,6 +622,124 @@ const REAL_ICS = "BEGIN:VCALENDAR\nPRODID:-//Medvind WFM/2026.11/SV\nVERSION:2.0
 let currentProfile = null; // cache av inloggad användares profilrad
 
 /* ---- Ändringslogg (spårar känsliga/oåterkalleliga händelser) ---- */
+/* ---- Dagens/veckans stjärna ---- */
+function stjarnaBannerHtml(s, label, allProfiles) {
+  const profile = allProfiles.find(p => p.id === s.user_id);
+  if (!profile) return "";
+  return `
+    <div style="display:flex; align-items:center; gap:8px;">
+      ${avatarHtml(profile, 30, false)}
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:11px; font-weight:800; color:#92700a; text-transform:uppercase; letter-spacing:0.03em;">⭐ ${label}</div>
+        <div style="font-size:13px; font-weight:700;">${profile.name}</div>
+        <div style="font-size:11.5px; color:#7a5f10; margin-top:1px;">${s.motivering}</div>
+      </div>
+    </div>
+  `;
+}
+
+async function loadStjarnor() {
+  const { data, error } = await sb.from("stjarna").select("*").order("created_at", { ascending: false }).limit(30);
+  return error ? [] : data;
+}
+
+function currentWeekMonday() {
+  return isoDate(startOfWeek(new Date()));
+}
+
+async function getPinnedStjarnor() {
+  const all = await loadStjarnor();
+  const todayIso = isoDate(new Date());
+  const weekMonday = currentWeekMonday();
+  const dagStjarna = all.find(s => s.typ === "dag" && s.datum === todayIso);
+  const veckaStjarna = all.find(s => s.typ === "vecka" && s.datum === weekMonday);
+  return { dagStjarna, veckaStjarna };
+}
+
+async function submitStjarna() {
+  const userId = document.getElementById("stjarna-user").value;
+  const typ = document.getElementById("stjarna-typ").value;
+  const motivering = document.getElementById("stjarna-motivering").value.trim();
+  const errorBox = document.getElementById("stjarna-error");
+  if (!userId) { errorBox.textContent = "Välj vem som ska utses."; return; }
+  if (!motivering) { errorBox.textContent = "Skriv en motivering."; return; }
+  const chef = getCurrentUser();
+  const datum = typ === "dag" ? isoDate(new Date()) : currentWeekMonday();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("stjarna").insert({ user_id: userId, motivering, typ, datum, created_by: chef.id });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  document.getElementById("stjarna-motivering").value = "";
+  errorBox.textContent = "";
+  await renderStjarnaSection();
+}
+
+function deleteStjarna(id, name) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "stjarna-delete-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Ta bort stjärna?</div>
+      <div class="kassa-modal-note" style="margin-top:0;">Utnämningen av <strong>${name}</strong> tas bort och försvinner från hemskärmen direkt. Det går inte att ångra.</div>
+      <button class="btn-primary off" id="stjarna-confirm-delete-btn">Ta bort</button>
+      <button class="btn-secondary" onclick="document.getElementById('stjarna-delete-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById("stjarna-confirm-delete-btn").onclick = async () => {
+    const { error } = await sb.from("stjarna").delete().eq("id", id);
+    overlay.remove();
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    await renderStjarnaSection();
+  };
+}
+
+async function renderStjarnaSection() {
+  const wrap = document.getElementById("stjarna-section");
+  if (!wrap) return;
+  const profiles = await fetchProfiles();
+  const stjarnor = await loadStjarnor();
+
+  wrap.innerHTML = `
+    <div class="kassa-section-title">Dagens/veckans stjärna</div>
+    <div class="field-group">
+      <label class="field-label">Person</label>
+      <select class="field-input" id="stjarna-user">
+        <option value="">Välj person</option>
+        ${profiles.map(p => `<option value="${p.id}">${p.name}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Typ</label>
+      <select class="field-input" id="stjarna-typ">
+        <option value="dag">Dagens stjärna</option>
+        <option value="vecka">Veckans stjärna</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Motivering</label>
+      <textarea class="field-input" id="stjarna-motivering" style="min-height:60px;" placeholder="Varför förtjänar personen det?"></textarea>
+    </div>
+    <div id="stjarna-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+    <button class="btn-primary" onclick="submitStjarna()">⭐ Utse</button>
+
+    <div class="kassa-section-title" style="margin-top:20px;">Senaste utnämningar</div>
+    ${stjarnor.length ? `<div class="kassa-row-list">${stjarnor.map(s => {
+      const profile = profiles.find(p => p.id === s.user_id);
+      return `
+        <div class="kassa-row" style="cursor:default; align-items:flex-start;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700;">⭐ ${profile ? profile.name : "Okänd"} <span style="font-weight:400; color:var(--muted); font-size:11px;">· ${s.typ === "dag" ? "Dagens" : "Veckans"} stjärna · ${fmtSvShort(s.datum)}</span></div>
+            <div style="font-size:12.5px; margin-top:2px;">${s.motivering}</div>
+          </div>
+          <button class="kr-delete" onclick="deleteStjarna('${s.id}', '${profile ? profile.name.replace(/'/g, "\\'") : "Okänd"}')" aria-label="Ta bort">✕</button>
+        </div>
+      `;
+    }).join("")}</div>` : `<div class="empty-state">Inga stjärnor utsedda ännu.</div>`}
+  `;
+}
+
 async function logAudit(action, details) {
   const user = getCurrentUser();
   if (!user) return;
@@ -896,7 +1014,10 @@ async function renderUsersView() {
       Byte av egen PIN-kod görs i Supabase Dashboard tills vidare.
     </div>
     <button class="btn-secondary" onclick="openAndringsloggModal()" style="margin-top:16px;">📋 Visa ändringslogg</button>
+
+    <div id="stjarna-section" style="margin-top:28px; padding-top:20px; border-top:1px solid var(--line);"></div>
   `;
+  await renderStjarnaSection();
 }
 
 async function changeUserRole(id, role) {
@@ -1546,8 +1667,18 @@ async function showSchema() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-schema").style.display = "block";
   weekOffset = 0; monthOffset = 0;
-  await Promise.all([loadEventsForCurrentUser(), loadFranvaroCache(), loadPersonalComments()]);
+  await Promise.all([loadEventsForCurrentUser(), loadFranvaroCache(), loadPersonalComments(), loadDayHeadings()]);
   renderSchema();
+}
+
+let dayHeadingsCache = [];
+async function loadDayHeadings() {
+  const { data, error } = await sb.from("schema_kommentarer").select("*").eq("typ", "rubrik");
+  dayHeadingsCache = error ? [] : data;
+}
+function headingForDay(iso) {
+  const row = dayHeadingsCache.find(r => r.datum === iso);
+  return row ? row.text : null;
 }
 
 let personalCommentsCache = [];
@@ -1607,6 +1738,8 @@ function renderWeek() {
     const iso = isoDate(d);
     const absence = user ? absenceOn(user.id, iso) : null;
     const hasComments = personalCommentsForDay(iso).length > 0;
+    const heading = headingForDay(iso);
+    if (heading) html += `<div style="background:var(--green-100); color:var(--green-700); font-size:11.5px; font-weight:700; padding:5px 12px; border-radius:8px; margin:6px 0 2px;">📌 ${heading}</div>`;
     html += `<div class="week-row ${isToday ? "today" : ""}" onclick="openPersonalDayDetail('${iso}')" style="cursor:pointer;">
       <div class="wd"><div class="name">${dayNames[i].slice(0,3)}</div><div class="num">${d.getDate()}</div></div>
       <div class="status">`;
@@ -1663,6 +1796,7 @@ function renderMonth() {
       else if (c && c.isOff) html += `<div class="pill off">Ledig</div>`;
       else if (c) html += `<div class="pill work">${fmtTime(c.start)}–${fmtTime(c.end)}</div>`;
       else html += `<div class="pill empty">–</div>`;
+      if (headingForDay(iso)) html += `<div class="comment-badge" style="padding:2px 5px; background:var(--green-100); color:var(--green-700);" title="${headingForDay(iso)}">📌</div>`;
       if (hasComments) html += `<div class="comment-badge" style="padding:2px 5px;">💬</div>`;
       html += `</div></td>`;
     }
@@ -1679,6 +1813,7 @@ const KOMMENTAR_TYP_LABEL = {
   offentlig: "Offentlig kommentar",
   personlig: "Personlig kommentar",
   chef: "Chefkommentar",
+  rubrik: "Rubrik för dagen",
 };
 
 function openPersonalDayDetail(iso) {
@@ -1698,6 +1833,7 @@ function openPersonalDayDetail(iso) {
       <div class="field-group">
         <label class="field-label">Typ av kommentar</label>
         <select class="field-input" id="personal-comment-typ">
+          <option value="rubrik">Rubrik för dagen (syns tydligt för alla i schemat)</option>
           <option value="onskemal">Önskemål (chefen får en notis)</option>
           <option value="offentlig">Offentlig kommentar (syns för alla i Gemensamt schema)</option>
           <option value="personlig" selected>Personlig kommentar (bara du ser den)</option>
@@ -2007,7 +2143,7 @@ function franvaroRowHtml(f) {
         ${f.har_kontaktat_chef ? `<div style="font-size:11px; color:var(--muted); margin-top:2px;">✔ Chef kontaktad</div>` : ""}
         ${f.har_sjukintyg ? `<div style="font-size:11px; color:var(--muted); margin-top:2px;">✔ Sjukintyg bekräftat</div>` : ""}
         ${f.frisk_anmald ? `<div style="font-size:11px; color:${f.frisk_hanterad ? "var(--green-700)" : "#b5590a"}; font-weight:700; margin-top:2px;">🩺 Friskanmäld, tillbaka ${fmtSvShort(f.frisk_datum)} ${f.frisk_hanterad ? "· Bekräftat" : "· Väntar på chef"}</div>` : ""}
-        ${kanFriskanmala ? `<button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:8px;" onclick="declareRecovery('${f.id}')">✅ Jag är frisk</button>` : ""}
+        ${kanFriskanmala ? `<button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:8px; border-color:var(--green-300); color:var(--green-700); font-weight:800;" onclick="declareRecovery('${f.id}')">🩺 Anmäl att du är frisk</button>` : ""}
       </div>
       <button class="kr-edit" onclick="editFranvaro('${f.id}')" aria-label="Redigera">✎</button>
     </div>
@@ -2504,6 +2640,39 @@ async function submitTraningResultat(traningId) {
   renderTraningPagaende();
 }
 
+async function submitHomeTraningResultat(traningId) {
+  const input = document.getElementById(`home-traning-input-${traningId}`);
+  const value = parseFloat(String(input.value).replace(",", "."));
+  const errorBox = document.getElementById(`home-traning-error-${traningId}`);
+  if (isNaN(value)) { errorBox.textContent = "Fyll i ett giltigt resultat."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("traning_resultat").insert({
+    traning_id: traningId, user_id: user.id, datum: isoDate(new Date()), resultat: value,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  await renderTodayWidget(user);
+}
+
+async function openTraningDetailModal(traningId) {
+  await loadTraningData();
+  const t = traningarCache.find(x => x.id === traningId);
+  if (!t) return;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "traning-detail-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      ${traningCardHtml(t, false)}
+      <button class="btn-secondary" onclick="document.getElementById('traning-detail-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+
+
 function deleteTraning(id, titel) {
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
@@ -2703,7 +2872,7 @@ async function showSharedSchema() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-shared-schema").style.display = "block";
   sharedWeekOffset = 0; sharedMonthOffset = 0;
-  await Promise.all([loadSharedSchedules(), loadSharedDayComments(), loadFranvaroCache()]);
+  await Promise.all([loadSharedSchedules(), loadSharedDayComments(), loadFranvaroCache(), loadDayHeadings()]);
   sharedAllProfiles = await fetchProfiles();
   renderSharedSchema();
 }
@@ -2773,11 +2942,13 @@ function renderSharedWeek() {
       `;
     }).join("");
 
+    const heading = headingForDay(iso);
     html += `
       <div class="kassa-section-title" style="${isToday ? "color:var(--green-700);" : ""} margin-top:20px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="openSharedDayDetail('${iso}')">
         <span>${dayNames[i]} ${d.getDate()}/${d.getMonth() + 1}${isToday ? " · Idag" : ""}</span>
         <span style="font-weight:400; text-transform:none; color:var(--green-700);">${dayComments.length ? `💬 ${dayComments.length}` : "+ Kommentar"}</span>
       </div>
+      ${heading ? `<div style="background:var(--green-100); color:var(--green-700); font-size:11.5px; font-weight:700; padding:5px 12px; border-radius:8px; margin-bottom:6px;">📌 ${heading}</div>` : ""}
       <div class="kassa-row-list">${rows}</div>
     `;
   });
@@ -2872,6 +3043,7 @@ function renderSharedMonth() {
       } else {
         html += `<div class="pill empty">–</div>`;
       }
+      if (headingForDay(iso)) html += `<div class="comment-badge" style="padding:2px 5px; background:var(--green-100); color:var(--green-700);" title="${headingForDay(iso)}">📌</div>`;
       if (hasComments) html += `<div class="comment-badge" style="padding:2px 5px;">💬</div>`;
       html += `</div></td>`;
     }
@@ -3001,6 +3173,7 @@ async function renderTodayWidget(user) {
   await loadFranvaroCache();
   const allProfilesForToday = await fetchProfiles();
   const { data: myPinnedTasks } = await sb.from("tilldelade_uppgifter").select("*").eq("target_user_id", user.id).eq("is_done", false).order("deadline", { ascending: true });
+  const { dagStjarna, veckaStjarna } = await getPinnedStjarnor();
   const pendingOnskemal = user.role === "chef" ? await loadPendingOnskemal() : [];
   const pendingFriskanmalningar = user.role === "chef" ? await loadPendingFriskanmalningar() : [];
   lastPendingFriskanmalningar = pendingFriskanmalningar;
@@ -3041,21 +3214,21 @@ async function renderTodayWidget(user) {
 
   if (pendingOnskemal.length) {
     noticeBlocks.push(`
-      <div onclick="openOnskemalModal(lastPendingOnskemal, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:8px 12px; margin-bottom:12px; font-size:12.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+      <div onclick="openOnskemalModal(lastPendingOnskemal, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
         📋 ${pendingOnskemal.length} önskemål väntar — tryck för att hantera
       </div>
     `);
   }
   if (pendingFriskanmalningar.length) {
     noticeBlocks.push(`
-      <div onclick="openFriskanmalningModal(lastPendingFriskanmalningar, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:8px 12px; margin-bottom:12px; font-size:12.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+      <div onclick="openFriskanmalningModal(lastPendingFriskanmalningar, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
         🩺 ${pendingFriskanmalningar.length} friskanmälan${pendingFriskanmalningar.length === 1 ? "" : "ar"} väntar — tryck för att bekräfta
       </div>
     `);
   }
   if (unseenOnskemalSvar.length) {
     noticeBlocks.push(`
-      <div onclick="openOnskemalSvarModal(lastUnseenOnskemalSvar)" style="cursor:pointer; background:var(--green-100); border:1px solid var(--green-300); border-radius:12px; padding:8px 12px; margin-bottom:12px; font-size:12.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
+      <div onclick="openOnskemalSvarModal(lastUnseenOnskemalSvar)" style="cursor:pointer; background:var(--green-100); border:1px solid var(--green-300); border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
         ✅ Chefen har svarat på ${unseenOnskemalSvar.length === 1 ? "ditt önskemål" : `${unseenOnskemalSvar.length} önskemål`} — tryck för att se
       </div>
     `);
@@ -3063,16 +3236,16 @@ async function renderTodayWidget(user) {
   (myPinnedTasks || []).forEach(t => {
     const overdue = t.deadline < todayIso;
     noticeBlocks.push(`
-      <div style="display:flex; align-items:flex-start; gap:8px; background:${overdue ? "#fdecec" : t.prioritet === "rod" ? "#fdecec" : t.prioritet === "gul" ? "#fff3d6" : "var(--green-050)"}; border:1px solid ${overdue ? "#b3261e" : t.prioritet === "rod" ? "#f3b9b9" : t.prioritet === "gul" ? "#f0dba3" : "var(--green-300)"}; border-radius:12px; padding:10px 12px; margin-bottom:6px;">
+      <div style="display:flex; align-items:flex-start; gap:6px; background:${overdue ? "#fdecec" : t.prioritet === "rod" ? "#fdecec" : t.prioritet === "gul" ? "#fff3d6" : "var(--green-050)"}; border:1px solid ${overdue ? "#b3261e" : t.prioritet === "rod" ? "#f3b9b9" : t.prioritet === "gul" ? "#f0dba3" : "var(--green-300)"}; border-radius:10px; padding:6px 8px; margin-bottom:4px;">
         <input type="checkbox" onchange="completePinnedTask('${t.id}', this.checked)" style="margin-top:2px;">
         <div style="flex:1; min-width:0;">
-          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
             <span class="priority-dot ${t.prioritet}"></span>
-            <span style="font-size:11px; font-weight:700; color:var(--muted);">${PRIORITET_LABEL[t.prioritet]}</span>
-            ${overdue ? `<span class="org-badge" style="background:#b3261e; color:var(--white); font-weight:800;">⏰ Försenad</span>` : ""}
-            <span style="font-size:11px; font-weight:700; color:${overdue ? "#b3261e" : "var(--muted)"};">Deadline: ${fmtSvShort(t.deadline)}</span>
+            <span style="font-size:10px; font-weight:700; color:var(--muted);">${PRIORITET_LABEL[t.prioritet]}</span>
+            ${overdue ? `<span class="org-badge" style="background:#b3261e; color:var(--white); font-weight:800; padding:1px 6px; font-size:9.5px;">⏰ Försenad</span>` : ""}
+            <span style="font-size:10px; font-weight:700; color:${overdue ? "#b3261e" : "var(--muted)"};">${fmtSvShort(t.deadline)}</span>
           </div>
-          <div style="font-size:13px; font-weight:600; margin-top:2px;">${t.text}</div>
+          <div style="font-size:12px; font-weight:600; margin-top:1px;">${t.text}</div>
         </div>
       </div>
     `);
@@ -3081,26 +3254,35 @@ async function renderTodayWidget(user) {
     const teamTop2 = teamLeaderboardFor(t.id).slice(0, 2);
     const individualTop2 = leaderboardFor(t.id).slice(0, 2);
     if (!teamTop2.length && !individualTop2.length) return;
+    const jagArDeltagare = deltagareFor(t.id).some(p => p.user_id === user.id);
     const teamRow = teamTop2.length ? `
-      <div style="display:flex; align-items:center; gap:8px; padding:6px 0;">
-        <span style="font-size:11px; font-weight:700; color:#b5590a; width:60px; flex-shrink:0;">LAG</span>
-        <span style="flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:13px;">
-          ${teamTop2.map((g, i) => `<span>${i === 0 ? "🥇" : "🥈"} Lag ${g.lag} (${g.total})</span>`).join("")}
+      <div style="display:flex; align-items:center; gap:4px; padding:3px 0;">
+        <span style="font-size:10px; font-weight:700; color:#b5590a; flex-shrink:0;">LAG</span>
+        <span style="display:flex; align-items:center; flex-wrap:nowrap; gap:7px; font-size:11.5px; overflow:hidden;">
+          ${teamTop2.map((g, i) => `<span style="white-space:nowrap;">${i === 0 ? "🥇" : "🥈"} Lag ${g.lag} (${g.total})</span>`).join("")}
         </span>
       </div>
     ` : "";
     const individualRow = individualTop2.length ? `
-      <div style="display:flex; align-items:center; gap:8px; padding:6px 0; ${teamTop2.length ? "border-top:1px dashed #f3b989;" : ""}">
-        <span style="font-size:11px; font-weight:700; color:#b5590a; width:60px; flex-shrink:0;">SOLO</span>
-        <span style="flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:13px;">
-          ${individualTop2.map((p, i) => `<span style="display:inline-flex; align-items:center; gap:5px;">${i === 0 ? "🥇" : "🥈"} ${avatarHtml(p.profile, 18, false)} ${p.profile.name.split(" ")[0]} (${p.total})</span>`).join("")}
+      <div style="display:flex; align-items:center; gap:4px; padding:3px 0; flex-wrap:wrap; ${teamTop2.length ? "border-top:1px dashed #f3b989;" : ""}">
+        <span style="font-size:10px; font-weight:700; color:#b5590a; flex-shrink:0;">SOLO</span>
+        <span style="display:flex; align-items:center; flex-wrap:nowrap; gap:6px; font-size:11.5px; flex-shrink:0;">
+          ${individualTop2.map((p, i) => `<span style="display:inline-flex; align-items:center; gap:3px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:120px; flex-shrink:0;">${i === 0 ? "🥇" : "🥈"} ${avatarHtml(p.profile, 14, false)} <span style="overflow:hidden; text-overflow:ellipsis;">${p.profile.name.split(" ")[0]}</span> (${p.total})</span>`).join("")}
         </span>
+        ${jagArDeltagare ? `
+          <span onclick="event.stopPropagation();" style="display:flex; gap:3px; flex-shrink:0; align-items:center;">
+            <input type="number" inputmode="decimal" id="home-traning-input-${t.id}" placeholder="Resultat" style="width:54px; font-size:11px; padding:3px 5px; border:1px solid var(--line); border-radius:7px; font-family:inherit;">
+            <button onclick="submitHomeTraningResultat('${t.id}')" style="flex-shrink:0; border:none; background:var(--green-700); color:white; border-radius:7px; padding:4px 8px; font-size:10.5px; font-weight:700; cursor:pointer;">Spara</button>
+          </span>
+        ` : ""}
       </div>
     ` : "";
+    const resultInputRow = jagArDeltagare ? `<div id="home-traning-error-${t.id}" style="color:#b3261e; font-size:10px; font-weight:700; margin-top:1px; text-align:right;"></div>` : "";
     noticeBlocks.push(`
-      <div style="background:#fff8f0; border:1px solid #f3b989; border-radius:12px; padding:8px 12px; margin-bottom:10px;">
-        <div style="font-size:12.5px; font-weight:800; display:flex; align-items:center; gap:5px;">🏆 ${t.titel}</div>
+      <div onclick="openTraningDetailModal('${t.id}')" style="cursor:pointer; background:#fff8f0; border:1px solid #f3b989; border-radius:10px; padding:6px 10px; margin-bottom:6px;">
+        <div style="font-size:11.5px; font-weight:800; display:flex; align-items:center; gap:5px;">🏆 ${t.titel} <span style="font-weight:400; color:var(--muted); font-size:10px;">· mer info</span></div>
         ${teamRow}${individualRow}
+        ${resultInputRow}
       </div>
     `);
   });
@@ -3110,8 +3292,14 @@ async function renderTodayWidget(user) {
 
   wrap.innerHTML = `
     <div class="today-card">
+      ${dagStjarna || veckaStjarna ? `
+        <div style="background:linear-gradient(135deg, #fff8e1, #fff0c2); border:1px solid #f0d878; border-radius:12px; padding:8px 10px; margin-bottom:8px;">
+          ${dagStjarna ? stjarnaBannerHtml(dagStjarna, "Dagens stjärna", allProfilesForToday) : ""}
+          ${veckaStjarna ? `${dagStjarna ? `<div style="border-top:1px dashed #e0c266; margin:6px 0;"></div>` : ""}${stjarnaBannerHtml(veckaStjarna, "Veckans stjärna", allProfilesForToday)}` : ""}
+        </div>
+      ` : ""}
       ${showCollapsed ? `
-        <div onclick="openAllNotificationsModal()" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:10px 12px; margin-bottom:12px; font-size:13px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+        <div onclick="openAllNotificationsModal()" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:7px 10px; margin-bottom:8px; font-size:12px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
           🔔 ${noticeBlocks.length} saker väntar på dig — tryck för att se
         </div>
       ` : noticeBlocks.join("")}
