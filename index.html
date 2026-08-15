@@ -1552,8 +1552,12 @@ async function manageUserSchedule(userId) {
   const users = await fetchProfiles();
   const u = users.find(x => x.id === userId);
   if (!u) return;
-  const { data: existingRow } = await sb.from("scheman").select("ics_content").eq("user_id", userId).maybeSingle();
+  const { data: existingRow } = await sb.from("scheman").select("ics_content, kalender_url, last_synced_at").eq("user_id", userId).maybeSingle();
   const existing = (existingRow && existingRow.ics_content) || "";
+  const existingUrl = (existingRow && existingRow.kalender_url) || "";
+  const lastSynced = existingRow && existingRow.last_synced_at
+    ? new Date(existingRow.last_synced_at).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
+    : null;
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "user-schedule-overlay";
@@ -1562,6 +1566,14 @@ async function manageUserSchedule(userId) {
     <div class="kassa-modal-card">
       <div class="kassa-modal-title">Schema för ${u.name}</div>
       <div class="field-group">
+        <label class="field-label">Prenumerationslänk från MedVind (valfritt)</label>
+        <input class="field-input" id="schedule-kalender-url" type="text" value="${existingUrl}" placeholder="https://apotekhjartat.medvind.visma.com/...">
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">
+          Fylls i denna hämtas schemat automatiskt varje timme. ${lastSynced ? `Senast synkat: ${lastSynced}.` : "Har inte synkats automatiskt ännu."}
+        </div>
+      </div>
+      ${existingUrl ? `<button class="btn-secondary" onclick="syncScheduleNow('${userId}')" id="sync-now-btn">🔄 Synka nu</button>` : ""}
+      <div class="field-group" style="margin-top:14px;">
         <label class="field-label">Ladda upp .ics-fil</label>
         <input class="field-input" id="schedule-file-input" type="file" accept=".ics,text/calendar">
       </div>
@@ -1588,12 +1600,26 @@ async function manageUserSchedule(userId) {
 
 async function saveUserSchedule(userId) {
   const text = document.getElementById("schedule-ics-text").value.trim();
+  const kalenderUrl = document.getElementById("schedule-kalender-url").value.trim();
   const errorBox = document.getElementById("user-schedule-error");
   if (!text) { errorBox.textContent = "Klistra in ICS-innehåll eller ladda upp en fil."; return; }
   if (!text.includes("BEGIN:VCALENDAR")) { errorBox.textContent = "Det här ser inte ut som en giltig .ics-fil."; return; }
-  const { error } = await sb.from("scheman").upsert({ user_id: userId, ics_content: text, updated_at: new Date().toISOString() });
+  const { error } = await sb.from("scheman").upsert({ user_id: userId, ics_content: text, kalender_url: kalenderUrl || null, updated_at: new Date().toISOString() });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   document.getElementById("user-schedule-overlay").remove();
+}
+
+async function syncScheduleNow(userId) {
+  const btn = document.getElementById("sync-now-btn");
+  const errorBox = document.getElementById("user-schedule-error");
+  if (btn) btn.textContent = "🔄 Synkar…";
+  const { data, error } = await sb.functions.invoke("sync-scheman");
+  if (error) { errorBox.textContent = "Kunde inte synka: " + error.message; if (btn) btn.textContent = "🔄 Synka nu"; return; }
+  const { data: updatedRow } = await sb.from("scheman").select("ics_content").eq("user_id", userId).maybeSingle();
+  if (updatedRow) document.getElementById("schedule-ics-text").value = updatedRow.ics_content;
+  errorBox.style.color = "var(--green-700)";
+  errorBox.textContent = "Synkat!";
+  if (btn) btn.textContent = "🔄 Synka nu";
 }
 
 function unfoldICS(raw) {
