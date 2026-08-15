@@ -1613,7 +1613,7 @@ async function syncScheduleNow(userId) {
   const btn = document.getElementById("sync-now-btn");
   const errorBox = document.getElementById("user-schedule-error");
   if (btn) btn.textContent = "🔄 Synkar…";
-  const { data, error } = await sb.functions.invoke("sync-scheman");
+  const { data, error } = await sb.functions.invoke("bright-processor");
   if (error) { errorBox.textContent = "Kunde inte synka: " + error.message; if (btn) btn.textContent = "🔄 Synka nu"; return; }
   const { data: updatedRow } = await sb.from("scheman").select("ics_content").eq("user_id", userId).maybeSingle();
   if (updatedRow) document.getElementById("schedule-ics-text").value = updatedRow.ics_content;
