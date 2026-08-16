@@ -2247,6 +2247,7 @@ function franvaroRowHtml(f) {
         ${kanFriskanmala ? `<button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:8px; border-color:var(--green-300); color:var(--green-700); font-weight:800;" onclick="declareRecovery('${f.id}')">🩺 Anmäl att du är frisk</button>` : ""}
       </div>
       <button class="kr-edit" onclick="editFranvaro('${f.id}')" aria-label="Redigera">✎</button>
+      <button class="kr-delete" onclick="deleteFranvaro('${f.id}')" aria-label="Ta bort">✕</button>
     </div>
   `;
 }
@@ -2350,6 +2351,33 @@ async function handleFriskanmalning(id) {
   const allProfiles = await fetchProfiles();
   if (items.length) openFriskanmalningModal(items, allProfiles);
   await renderTodayWidget(getCurrentUser());
+}
+
+function deleteFranvaro(id) {
+  const f = franvaroCache.find(x => x.id === id);
+  const range = f ? (f.forsta_dag === f.planerad_atokomst ? fmtSvShort(f.forsta_dag) : `${fmtSvShort(f.forsta_dag)} – ${fmtSvShort(f.planerad_atokomst)}`) : "";
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "franvaro-delete-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Ta bort frånvaroanmälan?</div>
+      <div class="kassa-modal-note" style="margin-top:0;">
+        Anmälan för <strong>${range}</strong> tas bort permanent, inklusive eventuell friskanmälan kopplad till den. Det går inte att ångra.
+      </div>
+      <button class="btn-primary off" id="franvaro-confirm-delete-btn">Ta bort</button>
+      <button class="btn-secondary" onclick="document.getElementById('franvaro-delete-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById("franvaro-confirm-delete-btn").onclick = async () => {
+    const { error } = await sb.from("franvaro").delete().eq("id", id);
+    overlay.remove();
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    await loadFranvaroCache();
+    renderFranvaroView();
+  };
 }
 
 function editFranvaro(id) {
