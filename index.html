@@ -1701,6 +1701,7 @@ function parseVEvents(lines) {
       if (key === "DTSTART") cur.start = parseICSDate(value.trim());
       else if (key === "DTEND") cur.end = parseICSDate(value.trim());
       else if (key === "SUMMARY") cur.summary = unescapeText(value.trim());
+      else if (key === "LOCATION") cur.location = unescapeText(value.trim());
     }
   }
   return events.filter(e => e.start);
@@ -1714,6 +1715,25 @@ function consolidateDay(dayEvents) {
   const start = working.reduce((min, e) => e.start < min ? e.start : min, working[0].start);
   const end = working.reduce((max, e) => e.end && e.end > max ? e.end : max, working[0].end || working[0].start);
   return { isOff: false, start, end };
+}
+
+/* Visar alla enskilda pass från MedVind för en dag var för sig — med
+   egen tid, benämning och plats — istället för den hopslagna
+   start–sluttiden som används i vecko-/månadsöversikten. */
+function dayEventsDetailHtml(dayEvents) {
+  if (!dayEvents.length) return `<div style="font-size:12.5px; color:var(--muted);">Inget schemalagt.</div>`;
+  const sorted = [...dayEvents].sort((a, b) => a.start - b.start);
+  return sorted.map(e => {
+    const isOff = (e.summary || "").toLowerCase().includes("arbetsfri");
+    if (isOff) return `<div style="padding:6px 0; font-size:12.5px; color:var(--muted);">Arbetsfri</div>`;
+    return `
+      <div style="padding:8px 0; border-bottom:1px solid var(--line);">
+        <div style="font-size:13.5px; font-weight:700;">${fmtTime(e.start)}${e.end ? `–${fmtTime(e.end)}` : ""}</div>
+        ${e.summary ? `<div style="font-size:12.5px; margin-top:1px;">${e.summary}</div>` : ""}
+        ${e.location ? `<div style="font-size:11.5px; color:var(--muted); margin-top:2px; display:flex; align-items:center; gap:4px;">📍 ${e.location}</div>` : ""}
+      </div>
+    `;
+  }).join("");
 }
 function fmtTime(d) { return d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }); }
 function startOfWeek(d) {
@@ -1895,6 +1915,7 @@ const KOMMENTAR_TYP_LABEL = {
 function openPersonalDayDetail(iso) {
   const label = fmtSvFull(iso);
   const comments = personalCommentsForDay(iso).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const dayEvents = myEvents.filter(e => isoDate(e.start) === iso);
 
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
@@ -1903,6 +1924,9 @@ function openPersonalDayDetail(iso) {
   overlay.innerHTML = `
     <div class="kassa-modal-card">
       <div class="kassa-modal-title">${label}</div>
+
+      <div class="kassa-section-title" style="margin-top:0;">Arbetspass (från MedVind)</div>
+      <div style="margin-bottom:14px;">${dayEventsDetailHtml(dayEvents)}</div>
 
       <div id="personal-day-comments" style="margin-bottom:14px;"></div>
 
@@ -3129,12 +3153,35 @@ function renderSharedMonth() {
   container.innerHTML = html;
 }
 
+function openSharedPersonDayDetail(profileId, iso) {
+  const entry = sharedSchedules.find(s => s.profile.id === profileId);
+  if (!entry) return;
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const dayEvents = entry.events.filter(e => sameDay(e.start, date));
+
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "shared-person-day-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${entry.profile.name} · ${fmtSvFull(iso)}</div>
+      <div class="kassa-section-title" style="margin-top:0;">Arbetspass (från MedVind)</div>
+      ${dayEventsDetailHtml(dayEvents)}
+      <button class="btn-secondary" style="margin-top:14px;" onclick="document.getElementById('shared-person-day-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
 function openSharedDayDetail(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const date = new Date(y, m - 1, d);
   const label = fmtSvFull(iso);
   const rows = profilesWithScheduleOrAbsence(iso).map(({ profile, events }) => {
-    const c = consolidateDay(events.filter(e => sameDay(e.start, date)));
+    const dayEvents = events.filter(e => sameDay(e.start, date));
+    const c = consolidateDay(dayEvents);
     const absence = absenceOn(profile.id, iso);
     let statusHtml;
     if (absence) statusHtml = `<span style="color:#b3261e; font-weight:700;">Sjuk</span>`;
@@ -3142,7 +3189,7 @@ function openSharedDayDetail(iso) {
     else if (c.isOff) statusHtml = `<span style="color:var(--muted);">Ledig</span>`;
     else statusHtml = `<span style="font-weight:700;">${fmtTime(c.start)}–${fmtTime(c.end)}</span>`;
     return `
-      <div class="kassa-row" style="cursor:default;">
+      <div class="kassa-row" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
         <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
           ${avatarHtml(profile, 24, !!absence)}
           <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;${absence ? " color:#b3261e;" : ""}">${profile.name}</span>
