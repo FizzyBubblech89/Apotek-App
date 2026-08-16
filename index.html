@@ -1788,14 +1788,30 @@ function dayHeadingsHtml(iso) {
   const rows = headingsForDay(iso);
   if (!rows.length) return "";
   return rows.map(r => `
-    <details style="background:var(--green-100); border-radius:8px; margin:4px 0 2px;">
-      <summary style="color:var(--green-700); font-size:11.5px; font-weight:700; padding:5px 12px; cursor:pointer; list-style:none;" onclick="event.stopPropagation();">📌 ${r.text}</summary>
-      <div style="padding:0 12px 8px 12px;" onclick="event.stopPropagation();">
-        ${r.detalj ? `<div style="font-size:12px; color:var(--green-700); white-space:pre-wrap; margin-bottom:6px;">${r.detalj}</div>` : ""}
-        <button class="btn-secondary" style="width:auto; padding:5px 10px; margin-top:0; font-size:11px;" onclick="editDayHeading('${r.id}', '${iso}')">✎ Redigera</button>
-      </div>
-    </details>
+    <div onclick="event.stopPropagation(); openHeadingDetailModal('${r.id}', '${iso}')" style="background:var(--green-100); color:var(--green-700); font-size:11.5px; font-weight:700; padding:5px 12px; border-radius:8px; margin:4px 0 2px; cursor:pointer;">
+      📌 ${r.text}
+    </div>
   `).join("");
+}
+
+function openHeadingDetailModal(id, iso) {
+  const row = dayHeadingsCache.find(r => r.id === id);
+  if (!row) return;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "heading-detail-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">📌 ${row.text}</div>
+      <div style="font-size:13.5px; white-space:pre-wrap; margin-bottom:18px; color:var(--ink);">
+        ${row.detalj ? row.detalj : `<span style="color:var(--muted);">Ingen detaljtext tillagd.</span>`}
+      </div>
+      <button class="btn-primary" onclick="document.getElementById('heading-detail-overlay').remove(); editDayHeading('${id}', '${iso}')">✎ Redigera</button>
+      <button class="btn-secondary" onclick="document.getElementById('heading-detail-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
 }
 
 let personalCommentsCache = [];
@@ -2058,7 +2074,11 @@ async function submitPersonalComment(iso) {
 function editDayHeading(id, iso) {
   const row = dayHeadingsCache.find(r => r.id === id);
   if (!row) return;
-  openPersonalDayDetail(iso); // säkerställer att formuläret finns, oavsett om man klickade från veckovyn eller redan var inne på dagen
+  ["heading-detail-overlay", "shared-day-overlay", "personal-day-overlay"].forEach(oid => {
+    const el = document.getElementById(oid);
+    if (el) el.remove();
+  });
+  openPersonalDayDetail(iso); // säkerställer att formuläret finns, oavsett om man klickade från veckovyn, Gemensamt schema eller redan var inne på dagen
   editingHeadingId = id;
   document.getElementById("personal-comment-typ").value = "rubrik";
   togglePersonalCommentMode();
@@ -3330,6 +3350,17 @@ function openSharedDayDetail(iso) {
       <div class="kassa-modal-title">${label}</div>
       <div class="kassa-row-list" style="margin-bottom:16px;">${rows || `<div class="empty-state">Inga scheman.</div>`}</div>
 
+      <div class="kassa-modal-label">Rubrik för dagen</div>
+      <div id="shared-day-headings" style="margin:8px 0 10px;">${dayHeadingsHtml(iso) || `<div style="font-size:12.5px; color:var(--muted);">Inga rubriker ännu.</div>`}</div>
+      <div class="field-group">
+        <input class="field-input" id="shared-day-rubrik" type="text" placeholder="Rubrik, t.ex. Inventering">
+      </div>
+      <div class="field-group">
+        <textarea class="field-input" id="shared-day-rubrik-detalj" style="min-height:50px;" placeholder="Detalj (valfritt)..."></textarea>
+      </div>
+      <div id="shared-day-rubrik-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:6px;"></div>
+      <button class="btn-secondary" onclick="submitSharedDayHeading('${iso}')" style="margin-bottom:18px;">📌 Lägg till rubrik</button>
+
       <div class="kassa-modal-label">Kommentarer</div>
       <div id="shared-day-comments" style="margin:8px 0 12px;"></div>
 
@@ -3382,6 +3413,23 @@ function renderSharedDayComments(iso) {
       </div>
     `;
   }).join("") : `<div style="font-size:12.5px; color:var(--muted);">Inga kommentarer än.</div>`;
+}
+
+async function submitSharedDayHeading(iso) {
+  const rubrik = document.getElementById("shared-day-rubrik").value.trim();
+  const detalj = document.getElementById("shared-day-rubrik-detalj").value.trim();
+  const errorBox = document.getElementById("shared-day-rubrik-error");
+  if (!rubrik) { errorBox.textContent = "Skriv en rubrik innan du sparar."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("schema_kommentarer").insert({ datum: iso, user_id: user.id, signum: user.signum, text: rubrik, detalj, typ: "rubrik" });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  document.getElementById("shared-day-rubrik").value = "";
+  document.getElementById("shared-day-rubrik-detalj").value = "";
+  errorBox.textContent = "";
+  await loadDayHeadings();
+  document.getElementById("shared-day-headings").innerHTML = dayHeadingsHtml(iso) || `<div style="font-size:12.5px; color:var(--muted);">Inga rubriker ännu.</div>`;
+  renderSharedSchema();
 }
 
 async function submitSharedDayComment(iso) {
