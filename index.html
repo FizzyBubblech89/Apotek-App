@@ -2806,6 +2806,7 @@ function traningCardHtml(t, isHistorik) {
           <div style="font-size:11.5px; color:var(--muted);">${periodLabel}</div>
         </div>
         <span class="org-badge" style="${isHistorik ? "background:var(--green-100);" : "background:#fde3c8; color:#b5590a;"} flex-shrink:0;">${isHistorik ? "Avslutad" : "Pågående"}</span>
+        ${isChef() ? `<button class="kr-edit" onclick="openEditTraningModal('${t.id}')" aria-label="Redigera" style="flex-shrink:0;">✎</button>` : ""}
         ${isChef() ? `<button class="kr-delete" onclick="deleteTraning('${t.id}', '${t.titel.replace(/'/g, "\\'")}')" aria-label="Ta bort" style="flex-shrink:0;">✕</button>` : ""}
       </div>
       ${t.mal ? `<div style="font-size:12.5px; margin-bottom:4px;"><b>Mål:</b> ${t.mal}</div>` : ""}
@@ -2815,9 +2816,12 @@ function traningCardHtml(t, isHistorik) {
         <div class="kassa-section-title" style="margin-top:4px;">Lagställning</div>
         <div class="kassa-row-list" style="margin-bottom:14px;">
           ${teamBoard.map((tm, i) => `
-            <div class="kassa-row" style="cursor:default;">
+            <div class="kassa-row" style="cursor:default; align-items:flex-start;">
               <div style="width:22px; font-weight:800; ${i === 0 ? "color:#b5590a;" : "color:var(--muted);"}">${i + 1}.</div>
-              <div style="flex:1; min-width:0;">Lag ${tm.lag}<span style="color:var(--muted); font-size:11px;"> (${tm.members.length} pers)</span></div>
+              <div style="flex:1; min-width:0;">
+                <div>Lag ${tm.lag}<span style="color:var(--muted); font-size:11px;"> (${tm.members.length} pers)</span></div>
+                <div style="font-size:11px; color:var(--muted); margin-top:2px;">${tm.members.map(m => m.profile.name).join(", ")}</div>
+              </div>
               <div style="font-weight:700;">${tm.total}</div>
             </div>
           `).join("")}
@@ -2915,6 +2919,138 @@ async function openTraningDetailModal(traningId) {
 }
 
 
+
+/* ---- Redigera befintlig träning (chef) ---- */
+let traningEditDraft = null;
+
+function openEditTraningModal(id) {
+  const t = traningarCache.find(x => x.id === id);
+  if (!t) return;
+  const deltagare = {};
+  traningDeltagareCache.filter(d => d.traning_id === id).forEach(d => {
+    deltagare[d.user_id] = { checked: true, lag: d.lag || "" };
+  });
+  traningEditDraft = {
+    id, titel: t.titel, startDatum: t.start_datum, slutDatum: t.slut_datum,
+    mal: t.mal || "", pris: t.pris || "", deltagare,
+  };
+  renderTraningEditModal();
+}
+
+function closeTraningEditModal() {
+  traningEditDraft = null;
+  const overlay = document.getElementById("traning-edit-overlay");
+  if (overlay) overlay.remove();
+}
+
+function toggleTraningEditDeltagare(userId, checked) {
+  if (!traningEditDraft.deltagare[userId]) traningEditDraft.deltagare[userId] = { checked: false, lag: "" };
+  traningEditDraft.deltagare[userId].checked = checked;
+  renderTraningEditModal();
+}
+function updateTraningEditLag(userId, value) {
+  if (!traningEditDraft.deltagare[userId]) traningEditDraft.deltagare[userId] = { checked: false, lag: "" };
+  traningEditDraft.deltagare[userId].lag = value;
+}
+
+function openTraningEditDatePicker(fieldKey) {
+  openGenericDatePicker(
+    () => traningEditDraft[fieldKey],
+    (iso) => { traningEditDraft[fieldKey] = iso; renderTraningEditModal(); }
+  );
+}
+
+function renderTraningEditModal() {
+  const d = traningEditDraft;
+  let overlay = document.getElementById("traning-edit-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "traning-edit-overlay";
+    overlay.className = "kassa-modal-overlay";
+    overlay.onclick = (ev) => { if (ev.target === overlay) closeTraningEditModal(); };
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Redigera träning</div>
+      <div class="field-group">
+        <label class="field-label">Titel</label>
+        <input class="field-input" type="text" value="${d.titel}" oninput="traningEditDraft.titel = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Startdatum</label>
+        <button type="button" class="field-input kassa-date-btn" onclick="openTraningEditDatePicker('startDatum')">${fmtSvFull(d.startDatum)}</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Slutdatum</label>
+        <button type="button" class="field-input kassa-date-btn" onclick="openTraningEditDatePicker('slutDatum')">${fmtSvFull(d.slutDatum)}</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Träningsmål</label>
+        <textarea class="field-input" style="min-height:60px;" oninput="traningEditDraft.mal = this.value">${d.mal}</textarea>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Pris</label>
+        <input class="field-input" type="text" value="${d.pris}" oninput="traningEditDraft.pris = this.value">
+      </div>
+
+      <div class="kassa-section-title">Deltagare — byt lag flyttar med poängen automatiskt</div>
+      <div class="kassa-checklist">
+        ${traningAllProfiles.map(p => `
+          <div class="kassa-check-row">
+            <input type="checkbox" ${d.deltagare[p.id] && d.deltagare[p.id].checked ? "checked" : ""} onchange="toggleTraningEditDeltagare('${p.id}', this.checked)">
+            <span class="kassa-check-info" style="flex:1;">
+              <span class="kassa-check-name">${p.name}</span>
+            </span>
+            <select class="field-input" style="width:100px; padding:6px 8px; font-size:16px;" onchange="updateTraningEditLag('${p.id}', this.value)" ${d.deltagare[p.id] && d.deltagare[p.id].checked ? "" : "disabled"}>
+              <option value="">Inget lag</option>
+              ${Array.from({ length: 15 }, (_, i) => i + 1).map(n => `<option value="${n}" ${(d.deltagare[p.id] && d.deltagare[p.id].lag) == n ? "selected" : ""}>Lag ${n}</option>`).join("")}
+            </select>
+          </div>
+        `).join("")}
+      </div>
+
+      <div id="traning-edit-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:10px 0 8px;"></div>
+      <button class="btn-primary" onclick="submitTraningEdit()">Spara ändringar</button>
+      <button class="btn-secondary" onclick="closeTraningEditModal()">Avbryt</button>
+    </div>
+  `;
+}
+
+async function submitTraningEdit() {
+  const d = traningEditDraft;
+  const errorBox = document.getElementById("traning-edit-error");
+  if (!d.titel.trim()) { errorBox.textContent = "Ge träningen en titel."; return; }
+  if (d.slutDatum < d.startDatum) { errorBox.textContent = "Slutdatum kan inte vara före startdatum."; return; }
+
+  errorBox.textContent = "Sparar…";
+  const { error: updateError } = await sb.from("traningar").update({
+    titel: d.titel.trim(), start_datum: d.startDatum, slut_datum: d.slutDatum, mal: d.mal.trim(), pris: d.pris.trim(),
+  }).eq("id", d.id);
+  if (updateError) { errorBox.textContent = "Kunde inte spara: " + updateError.message; return; }
+
+  const wasParticipant = new Set(traningDeltagareCache.filter(x => x.traning_id === d.id).map(x => x.user_id));
+  const nowSelected = Object.entries(d.deltagare).filter(([, v]) => v.checked).map(([userId, v]) => ({ userId, lag: v.lag }));
+
+  for (const { userId, lag } of nowSelected) {
+    const { error } = await sb.from("traning_deltagare").upsert(
+      { traning_id: d.id, user_id: userId, lag },
+      { onConflict: "traning_id,user_id" }
+    );
+    if (error) { errorBox.textContent = "Kunde inte spara deltagare: " + error.message; return; }
+  }
+  const nowSelectedIds = new Set(nowSelected.map(x => x.userId));
+  for (const userId of wasParticipant) {
+    if (!nowSelectedIds.has(userId)) {
+      await sb.from("traning_deltagare").delete().eq("traning_id", d.id).eq("user_id", userId);
+    }
+  }
+
+  await logAudit("Redigerade träning", d.titel);
+  closeTraningEditModal();
+  await loadTraningData();
+  renderTraning();
+}
 
 function deleteTraning(id, titel) {
   confirmDelete(
