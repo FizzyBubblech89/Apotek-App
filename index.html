@@ -696,32 +696,45 @@ async function submitStjarna() {
   await renderStjarnaSection();
 }
 
-function deleteStjarna(id, name) {
+/* Gemensam "Ta bort?"-bekräftelseruta — används av stjärnor, frånvaro,
+   träning, tilldelade uppgifter och kassaredovisning. Var och en av dessa
+   hade tidigare en egen, nästan identisk kopia av samma modal-kod. */
+function confirmDelete(title, message, onConfirm) {
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
-  overlay.id = "stjarna-delete-overlay";
+  overlay.id = "confirm-delete-overlay";
   overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
     <div class="kassa-modal-card">
-      <div class="kassa-modal-title">Ta bort stjärna?</div>
-      <div class="kassa-modal-note" style="margin-top:0;">Utnämningen av <strong>${name}</strong> tas bort och försvinner från hemskärmen direkt. Det går inte att ångra.</div>
-      <button class="btn-primary off" id="stjarna-confirm-delete-btn">Ta bort</button>
-      <button class="btn-secondary" onclick="document.getElementById('stjarna-delete-overlay').remove()">Avbryt</button>
+      <div class="kassa-modal-title">${title}</div>
+      <div class="kassa-modal-note" style="margin-top:0;">${message}</div>
+      <button class="btn-primary off" id="confirm-delete-btn">Ta bort</button>
+      <button class="btn-secondary" onclick="document.getElementById('confirm-delete-overlay').remove()">Avbryt</button>
     </div>
   `;
   document.body.appendChild(overlay);
-  document.getElementById("stjarna-confirm-delete-btn").onclick = async () => {
-    const { error } = await sb.from("stjarna").delete().eq("id", id);
+  document.getElementById("confirm-delete-btn").onclick = async () => {
+    await onConfirm();
     overlay.remove();
-    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-    await renderStjarnaSection();
   };
 }
 
-async function renderStjarnaSection() {
+function deleteStjarna(id, name) {
+  confirmDelete(
+    "Ta bort stjärna?",
+    `Utnämningen av <strong>${name}</strong> tas bort och försvinner från hemskärmen direkt. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("stjarna").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await renderStjarnaSection();
+    }
+  );
+}
+
+async function renderStjarnaSection(profilesOverride) {
   const wrap = document.getElementById("stjarna-section");
   if (!wrap) return;
-  const profiles = await fetchProfiles();
+  const profiles = profilesOverride || await fetchProfiles();
   const stjarnor = await loadStjarnor();
 
   wrap.innerHTML = `
@@ -1042,7 +1055,7 @@ async function renderUsersView() {
 
     <div id="stjarna-section" style="margin-top:28px; padding-top:20px; border-top:1px solid var(--line);"></div>
   `;
-  await renderStjarnaSection();
+  await renderStjarnaSection(users);
 }
 
 async function changeUserRole(id, role) {
@@ -2204,9 +2217,8 @@ async function submitOnskemalSvar(id, svarTyp) {
   const overlay = document.getElementById("onskemal-overlay");
   if (overlay) overlay.remove();
   const items = await loadPendingOnskemal();
-  const allProfiles = await fetchProfiles();
-  if (items.length) openOnskemalModal(items, allProfiles);
-  await renderTodayWidget(getCurrentUser());
+  await renderTodayWidget(getCurrentUser()); // hämtar profillistan internt — återanvänds nedan istället för ett eget anrop
+  if (items.length) openOnskemalModal(items, lastAllProfilesForToday);
 }
 
 /* ---- Gemensamt schema (alla roller ser allas scheman) ---- */
@@ -2458,9 +2470,8 @@ async function handleFriskanmalning(id) {
   const overlay = document.getElementById("friskanmalning-overlay");
   if (overlay) overlay.remove();
   const items = await loadPendingFriskanmalningar();
-  const allProfiles = await fetchProfiles();
-  if (items.length) openFriskanmalningModal(items, allProfiles);
   await renderTodayWidget(getCurrentUser());
+  if (items.length) openFriskanmalningModal(items, lastAllProfilesForToday);
 }
 
 function deleteFranvaro(id) {
@@ -2469,28 +2480,16 @@ function deleteFranvaro(id) {
   const isOwn = f && f.user_id === (getCurrentUser() || {}).id;
   const profile = !isOwn && f ? franvaroAllProfiles.find(p => p.id === f.user_id) : null;
   const whoLabel = profile ? ` för <strong>${profile.name}</strong>` : "";
-  const overlay = document.createElement("div");
-  overlay.className = "kassa-modal-overlay";
-  overlay.id = "franvaro-delete-overlay";
-  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `
-    <div class="kassa-modal-card">
-      <div class="kassa-modal-title">Ta bort frånvaroanmälan?</div>
-      <div class="kassa-modal-note" style="margin-top:0;">
-        Anmälan${whoLabel} för <strong>${range}</strong> tas bort permanent, inklusive eventuell friskanmälan kopplad till den. Det går inte att ångra.
-      </div>
-      <button class="btn-primary off" id="franvaro-confirm-delete-btn">Ta bort</button>
-      <button class="btn-secondary" onclick="document.getElementById('franvaro-delete-overlay').remove()">Avbryt</button>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  document.getElementById("franvaro-confirm-delete-btn").onclick = async () => {
-    const { error } = await sb.from("franvaro").delete().eq("id", id);
-    overlay.remove();
-    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-    await loadFranvaroCache();
-    renderFranvaroView();
-  };
+  confirmDelete(
+    "Ta bort frånvaroanmälan?",
+    `Anmälan${whoLabel} för <strong>${range}</strong> tas bort permanent, inklusive eventuell friskanmälan kopplad till den. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("franvaro").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadFranvaroCache();
+      renderFranvaroView();
+    }
+  );
 }
 
 function editFranvaro(id) {
@@ -2916,30 +2915,17 @@ async function openTraningDetailModal(traningId) {
 
 
 function deleteTraning(id, titel) {
-  const overlay = document.createElement("div");
-  overlay.className = "kassa-modal-overlay";
-  overlay.id = "traning-delete-overlay";
-  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `
-    <div class="kassa-modal-card">
-      <div class="kassa-modal-title">Ta bort träning?</div>
-      <div class="kassa-modal-note" style="margin-top:0;">
-        <strong>${titel}</strong> tas bort permanent — tillsammans med alla deltagare och alla inmatade resultat.
-        Det går inte att ångra.
-      </div>
-      <button class="btn-primary off" id="traning-confirm-delete-btn">Ta bort</button>
-      <button class="btn-secondary" onclick="document.getElementById('traning-delete-overlay').remove()">Avbryt</button>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  document.getElementById("traning-confirm-delete-btn").onclick = async () => {
-    const { error } = await sb.from("traningar").delete().eq("id", id);
-    overlay.remove();
-    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-    await logAudit("Tog bort träning", titel);
-    await loadTraningData();
-    renderTraning();
-  };
+  confirmDelete(
+    "Ta bort träning?",
+    `<strong>${titel}</strong> tas bort permanent — tillsammans med alla deltagare och alla inmatade resultat. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("traningar").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await logAudit("Tog bort träning", titel);
+      await loadTraningData();
+      renderTraning();
+    }
+  );
 }
 
 /* ---- Tilldela uppgift (riktad uppgift mot en person, med deadline + prioritet) ---- */
@@ -3078,29 +3064,17 @@ async function completePinnedTask(id, checked) {
 function deleteTaskAssignment(id) {
   const task = taskAssignCache.find(t => t.id === id);
   const profile = task && taskAssignAllProfiles.find(p => p.id === task.target_user_id);
-  const overlay = document.createElement("div");
-  overlay.className = "kassa-modal-overlay";
-  overlay.id = "task-delete-overlay";
-  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `
-    <div class="kassa-modal-card">
-      <div class="kassa-modal-title">Ta bort uppgift?</div>
-      <div class="kassa-modal-note" style="margin-top:0;">
-        Uppgiften${profile ? ` till <strong>${profile.name}</strong>` : ""} tas bort permanent och försvinner direkt hos mottagaren. Det går inte att ångra.
-      </div>
-      <button class="btn-primary off" id="task-confirm-delete-btn">Ta bort</button>
-      <button class="btn-secondary" onclick="document.getElementById('task-delete-overlay').remove()">Avbryt</button>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  document.getElementById("task-confirm-delete-btn").onclick = async () => {
-    const { error } = await sb.from("tilldelade_uppgifter").delete().eq("id", id);
-    overlay.remove();
-    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-    await logAudit("Tog bort tilldelad uppgift", `${task ? task.text : ""}${profile ? " (till " + profile.name + ")" : ""}`);
-    await loadTaskAssignments();
-    renderTasksView();
-  };
+  confirmDelete(
+    "Ta bort uppgift?",
+    `Uppgiften${profile ? ` till <strong>${profile.name}</strong>` : ""} tas bort permanent och försvinner direkt hos mottagaren. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("tilldelade_uppgifter").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await logAudit("Tog bort tilldelad uppgift", `${task ? task.text : ""}${profile ? " (till " + profile.name + ")" : ""}`);
+      await loadTaskAssignments();
+      renderTasksView();
+    }
+  );
 }
 
 function openTaskDatePicker() {
@@ -4292,27 +4266,16 @@ function deleteKassaEntry(id) {
   const e = kassaEntriesCache.find(x => x.id === id);
   if (!e) return;
   const label = e.forsaljningDatum ? fmtSvFull(e.forsaljningDatum) : "denna redovisning";
-
-  const overlay = document.createElement("div");
-  overlay.className = "kassa-modal-overlay";
-  overlay.id = "kassa-delete-overlay";
-  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `
-    <div class="kassa-modal-card">
-      <div class="kassa-modal-title">Ta bort redovisning?</div>
-      <div class="kassa-modal-note" style="margin-top:0;">Kassaredovisningen för <strong>${label}</strong> tas bort permanent. Det går inte att ångra.</div>
-      <button class="btn-primary off" id="kassa-confirm-delete-btn">Ta bort</button>
-      <button class="btn-secondary" onclick="document.getElementById('kassa-delete-overlay').remove()">Avbryt</button>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  document.getElementById("kassa-confirm-delete-btn").onclick = async () => {
-    const { error } = await sb.from("kassaredovisningar").delete().eq("id", id);
-    if (error) { alert("Kunde inte ta bort: " + error.message); }
-    else { await logAudit("Tog bort kassaredovisning", `${label} (${e.signum}), differens: ${e.diff > 0 ? "+" : ""}${fmtKr(num(e.diff))}`); }
-    overlay.remove();
-    await renderKassaHistory();
-  };
+  confirmDelete(
+    "Ta bort redovisning?",
+    `Kassaredovisningen för <strong>${label}</strong> tas bort permanent. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("kassaredovisningar").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); }
+      else { await logAudit("Tog bort kassaredovisning", `${label} (${e.signum}), differens: ${e.diff > 0 ? "+" : ""}${fmtKr(num(e.diff))}`); }
+      await renderKassaHistory();
+    }
+  );
 }
 
 init();
