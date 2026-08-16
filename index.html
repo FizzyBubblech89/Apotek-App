@@ -1770,12 +1770,32 @@ async function showSchema() {
 
 let dayHeadingsCache = [];
 async function loadDayHeadings() {
-  const { data, error } = await sb.from("schema_kommentarer").select("*").eq("typ", "rubrik");
+  const { data, error } = await sb.from("schema_kommentarer").select("*").eq("typ", "rubrik").order("created_at", { ascending: true });
   dayHeadingsCache = error ? [] : data;
 }
+function headingsForDay(iso) {
+  return dayHeadingsCache.filter(r => r.datum === iso);
+}
+/* Bakåtkompatibel enkel-variant (returnerar bara texten på första rubriken,
+   används bara i lägen där man vill visa en kompakt indikator, t.ex. månadsvyn). */
 function headingForDay(iso) {
-  const row = dayHeadingsCache.find(r => r.datum === iso);
-  return row ? row.text : null;
+  const rows = headingsForDay(iso);
+  return rows.length ? rows[0].text : null;
+}
+/* Bygger de staplade, tryckbara rubrik-banderollerna för en dag —
+   bara rubriken syns, ett tryck fäller ut detaljen (native <details>). */
+function dayHeadingsHtml(iso) {
+  const rows = headingsForDay(iso);
+  if (!rows.length) return "";
+  return rows.map(r => `
+    <details style="background:var(--green-100); border-radius:8px; margin:4px 0 2px;">
+      <summary style="color:var(--green-700); font-size:11.5px; font-weight:700; padding:5px 12px; cursor:pointer; list-style:none;" onclick="event.stopPropagation();">📌 ${r.text}</summary>
+      <div style="padding:0 12px 8px 12px;" onclick="event.stopPropagation();">
+        ${r.detalj ? `<div style="font-size:12px; color:var(--green-700); white-space:pre-wrap; margin-bottom:6px;">${r.detalj}</div>` : ""}
+        <button class="btn-secondary" style="width:auto; padding:5px 10px; margin-top:0; font-size:11px;" onclick="editDayHeading('${r.id}', '${iso}')">✎ Redigera</button>
+      </div>
+    </details>
+  `).join("");
 }
 
 let personalCommentsCache = [];
@@ -1835,8 +1855,7 @@ function renderWeek() {
     const iso = isoDate(d);
     const absence = user ? absenceOn(user.id, iso) : null;
     const hasComments = personalCommentsForDay(iso).length > 0;
-    const heading = headingForDay(iso);
-    if (heading) html += `<div style="background:var(--green-100); color:var(--green-700); font-size:11.5px; font-weight:700; padding:5px 12px; border-radius:8px; margin:6px 0 2px;">📌 ${heading}</div>`;
+    if (headingsForDay(iso).length) html += dayHeadingsHtml(iso);
     html += `<div class="week-row ${isToday ? "today" : ""}" onclick="openPersonalDayDetail('${iso}')" style="cursor:pointer;">
       <div class="wd"><div class="name">${dayNames[i].slice(0,3)}</div><div class="num">${d.getDate()}</div></div>
       <div class="status">`;
@@ -1933,7 +1952,7 @@ function openPersonalDayDetail(iso) {
 
       <div class="field-group">
         <label class="field-label">Typ av kommentar</label>
-        <select class="field-input" id="personal-comment-typ">
+        <select class="field-input" id="personal-comment-typ" onchange="togglePersonalCommentMode()">
           <option value="rubrik">Rubrik för dagen (syns tydligt för alla i schemat)</option>
           <option value="onskemal">Önskemål (chefen får en notis)</option>
           <option value="offentlig">Offentlig kommentar (syns för alla i Gemensamt schema)</option>
@@ -1941,15 +1960,26 @@ function openPersonalDayDetail(iso) {
           <option value="chef">Chefkommentar (chefen ser den)</option>
         </select>
       </div>
-      <div class="field-group">
+      <div id="personal-rubrik-fields" style="display:none;">
+        <div class="field-group">
+          <label class="field-label">Rubrik (syns direkt i schemat)</label>
+          <input class="field-input" id="personal-comment-rubrik" type="text" placeholder="T.ex. Inventering">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Detalj (visas när man trycker på rubriken)</label>
+          <textarea class="field-input" id="personal-comment-detalj" style="min-height:60px;" placeholder="Mer information..."></textarea>
+        </div>
+      </div>
+      <div class="field-group" id="personal-comment-text-group">
         <textarea class="field-input" id="personal-comment-text" style="min-height:70px;" placeholder="Skriv din kommentar här..."></textarea>
       </div>
       <div id="personal-comment-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
-      <button class="btn-primary" onclick="submitPersonalComment('${iso}')">Spara kommentar</button>
+      <button class="btn-primary" id="personal-comment-submit-btn" onclick="submitPersonalComment('${iso}')">Spara kommentar</button>
       <button class="btn-secondary" onclick="document.getElementById('personal-day-overlay').remove()">Stäng</button>
     </div>
   `;
   document.body.appendChild(overlay);
+  togglePersonalCommentMode();
   renderPersonalDayComments(iso);
 }
 
@@ -1976,12 +2006,45 @@ function renderPersonalDayComments(iso) {
   `).join("");
 }
 
+let editingHeadingId = null; // satt när man redigerar en befintlig rubrik, annars null
+
+function togglePersonalCommentMode() {
+  const typ = document.getElementById("personal-comment-typ").value;
+  const isRubrik = typ === "rubrik";
+  document.getElementById("personal-rubrik-fields").style.display = isRubrik ? "block" : "none";
+  document.getElementById("personal-comment-text-group").style.display = isRubrik ? "none" : "block";
+  document.getElementById("personal-comment-submit-btn").textContent = editingHeadingId ? "Spara ändringar" : "Spara kommentar";
+}
+
 async function submitPersonalComment(iso) {
   const typ = document.getElementById("personal-comment-typ").value;
-  const text = document.getElementById("personal-comment-text").value.trim();
   const errorBox = document.getElementById("personal-comment-error");
-  if (!text) { errorBox.textContent = "Skriv något innan du sparar."; return; }
   const user = getCurrentUser();
+
+  if (typ === "rubrik") {
+    const rubrik = document.getElementById("personal-comment-rubrik").value.trim();
+    const detalj = document.getElementById("personal-comment-detalj").value.trim();
+    if (!rubrik) { errorBox.textContent = "Skriv en rubrik innan du sparar."; return; }
+    errorBox.textContent = "Sparar…";
+    if (editingHeadingId) {
+      const { error } = await sb.from("schema_kommentarer").update({ text: rubrik, detalj }).eq("id", editingHeadingId);
+      if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+      editingHeadingId = null;
+    } else {
+      const { error } = await sb.from("schema_kommentarer").insert({ datum: iso, user_id: user.id, signum: user.signum, text: rubrik, detalj, typ: "rubrik" });
+      if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+    }
+    document.getElementById("personal-comment-rubrik").value = "";
+    document.getElementById("personal-comment-detalj").value = "";
+    errorBox.textContent = "";
+    togglePersonalCommentMode();
+    await loadDayHeadings();
+    renderSchema();
+    return;
+  }
+
+  const text = document.getElementById("personal-comment-text").value.trim();
+  if (!text) { errorBox.textContent = "Skriv något innan du sparar."; return; }
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("schema_kommentarer").insert({ datum: iso, user_id: user.id, signum: user.signum, text, typ });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
@@ -1990,6 +2053,18 @@ async function submitPersonalComment(iso) {
   await loadPersonalComments();
   renderPersonalDayComments(iso);
   renderSchema();
+}
+
+function editDayHeading(id, iso) {
+  const row = dayHeadingsCache.find(r => r.id === id);
+  if (!row) return;
+  openPersonalDayDetail(iso); // säkerställer att formuläret finns, oavsett om man klickade från veckovyn eller redan var inne på dagen
+  editingHeadingId = id;
+  document.getElementById("personal-comment-typ").value = "rubrik";
+  togglePersonalCommentMode();
+  document.getElementById("personal-comment-rubrik").value = row.text;
+  document.getElementById("personal-comment-detalj").value = row.detalj || "";
+  document.getElementById("personal-comment-rubrik").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function deletePersonalComment(id, iso) {
@@ -3080,7 +3155,7 @@ function renderSharedWeek() {
       else if (c.isOff) statusHtml = `<span style="color:var(--muted);">Ledig</span>`;
       else statusHtml = `<span style="font-weight:700;">${fmtTime(c.start)}–${fmtTime(c.end)}</span>`;
       return `
-        <div class="kassa-row" style="cursor:default;">
+        <div class="kassa-row" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
           <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
             ${avatarHtml(profile, 24, !!absence)}
             <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;${absence ? " color:#b3261e;" : ""}">${profile.name}</span>
@@ -3090,13 +3165,12 @@ function renderSharedWeek() {
       `;
     }).join("");
 
-    const heading = headingForDay(iso);
     html += `
       <div class="kassa-section-title" style="${isToday ? "color:var(--green-700);" : ""} margin-top:20px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="openSharedDayDetail('${iso}')">
         <span>${dayNames[i]} ${d.getDate()}/${d.getMonth() + 1}${isToday ? " · Idag" : ""}</span>
         <span style="font-weight:400; text-transform:none; color:var(--green-700);">${dayComments.length ? `💬 ${dayComments.length}` : "+ Kommentar"}</span>
       </div>
-      ${heading ? `<div style="background:var(--green-100); color:var(--green-700); font-size:11.5px; font-weight:700; padding:5px 12px; border-radius:8px; margin-bottom:6px;">📌 ${heading}</div>` : ""}
+      ${dayHeadingsHtml(iso)}
       <div class="kassa-row-list">${rows}</div>
     `;
   });
