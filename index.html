@@ -3467,7 +3467,6 @@ async function renderTodayWidget(user) {
 
   const [
     ,
-    ,
     pinnedTasksRes,
     stjarnor,
     pendingOnskemal,
@@ -3475,7 +3474,6 @@ async function renderTodayWidget(user) {
     unseenOnskemalSvar,
     tasksRes,
   ] = await Promise.all([
-    loadSharedSchedules(allProfilesForToday),
     loadFranvaroCache(),
     sb.from("tilldelade_uppgifter").select("*").eq("target_user_id", user.id).eq("is_done", false).order("deadline", { ascending: true }),
     getPinnedStjarnor(),
@@ -3493,19 +3491,8 @@ async function renderTodayWidget(user) {
   lastAllProfilesForToday = allProfilesForToday;
   lastUnseenOnskemalSvar = unseenOnskemalSvar;
 
-  const workingToday = sharedSchedules
-    .filter(({ events }) => {
-      const c = consolidateDay(events.filter(e => sameDay(e.start, new Date())));
-      return c && !c.isOff;
-    })
-    .map(s => s.profile);
-  const workingTodayIds = new Set(workingToday.map(p => p.id));
   const absentToday = allProfilesForToday.filter(p => absenceOn(p.id, todayIso));
-  const absentTodayIds = new Set(absentToday.map(p => p.id));
-  const todayPeople = [
-    ...workingToday.map(p => ({ profile: p, absent: absentTodayIds.has(p.id) })),
-    ...absentToday.filter(p => !workingTodayIds.has(p.id)).map(p => ({ profile: p, absent: true })),
-  ];
+  const todayPeople = absentToday.map(p => ({ profile: p, absent: true }));
 
   const tasks = tasksRes.data;
   const myTasks = (tasks || [])
@@ -3614,16 +3601,16 @@ async function renderTodayWidget(user) {
         </div>
       ` : noticeBlocks.join("")}
       <div class="today-date">${dateLabel}</div>
-      <div class="today-working">
-        ${todayPeople.length
-          ? todayPeople.map(({ profile, absent }) => `
-              <div class="today-chip" style="${absent ? "background:#fdecec; color:#b3261e;" : ""}">
-                ${avatarHtml(profile, 20, absent)}
-                ${profile.name.split(" ")[0]}${absent ? " · Sjuk" : ""}
+      ${todayPeople.length ? `
+        <div class="today-working">
+          ${todayPeople.map(({ profile }) => `
+              <div class="today-chip" style="background:#fdecec; color:#b3261e;">
+                ${avatarHtml(profile, 20, true)}
+                ${profile.name.split(" ")[0]} · Sjuk
               </div>
-            `).join("")
-          : `<span style="font-size:12px; color:var(--muted);">Ingen inlagd i schemat idag.</span>`}
-      </div>
+            `).join("")}
+        </div>
+      ` : ""}
       ${myTasks.length ? myTasks.map(t => {
         let targetLabel = "";
         if (t.target_user_id === null) targetLabel = ` <span style="color:var(--muted); font-size:11px;">(hela apoteket)</span>`;
