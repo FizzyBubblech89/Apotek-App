@@ -293,7 +293,7 @@
     width: 128px;
   }
   .org-avatar {
-    width: 52px; height: 52px; border-radius: 50%; overflow: hidden; background: var(--green-100); color: var(--green-700);
+    width: 52px; height: 52px; border-radius: 50%; overflow: hidden; background: var(--green-100); color: var(--white);
     display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; margin-bottom: 8px;
   }
   .org-name { font-size: 13px; font-weight: 700; line-height: 1.25; }
@@ -1299,9 +1299,10 @@ function orgCardHtml(u) {
   const avatar = u.avatar_url
     ? `<img src="${u.avatar_url}" style="width:100%; height:100%; object-fit:cover;">`
     : (u.name || "?").charAt(0).toUpperCase();
+  const orgAvatarBg = u.avatar_url ? "" : `background:${avatarColorFor(u)};`;
   return `
     <div class="org-card">
-      <div class="org-avatar">${avatar}</div>
+      <div class="org-avatar" style="${orgAvatarBg}">${avatar}</div>
       <div class="org-name">${u.name}</div>
       <div class="org-signum">${u.signum}</div>
       ${badges.length ? `
@@ -3175,6 +3176,24 @@ function renderSharedWeek() {
 /* Gemensam avatar-markup. Vid frånvaro: ring + en tydlig röd prick i hörnet
    (samma mönster som "upptagen"-status i Slack/Teams — mycket lättare att
    se på en liten avatar än en tunn ram runt hela bilden). */
+const AVATAR_PALETTE = [
+  ["#34d399", "#059669"], // grön
+  ["#38bdf8", "#0284c7"], // blå
+  ["#fb7185", "#e11d48"], // rosa
+  ["#a78bfa", "#7c3aed"], // lila
+  ["#fbbf24", "#d97706"], // amber
+  ["#2dd4bf", "#0d9488"], // teal
+  ["#fb923c", "#ea580c"], // orange
+  ["#818cf8", "#4f46e5"], // indigo
+];
+function avatarColorFor(profile) {
+  const key = String((profile && (profile.id || profile.name)) || "?");
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  const [c1, c2] = AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+  return `linear-gradient(150deg, ${c1}, ${c2})`;
+}
+
 function avatarHtml(profile, size, absent) {
   size = size || 24;
   const inner = profile.avatar_url
@@ -3185,9 +3204,10 @@ function avatarHtml(profile, size, absent) {
   const dot = absent
     ? `<span style="position:absolute; bottom:-1px; right:-1px; width:${dotSize}px; height:${dotSize}px; background:#c9382d; border-radius:50%; border:2px solid var(--white); box-shadow:0 1px 2px rgba(0,0,0,0.2);"></span>`
     : "";
+  const bg = profile.avatar_url ? "" : `background:${avatarColorFor(profile)};`;
   return `
     <span style="position:relative; display:inline-flex; flex-shrink:0; line-height:0;">
-      <div class="today-chip-avatar" style="width:${size}px; height:${size}px; font-size:${fontSize}px;${absent ? " box-shadow:0 0 0 2px #c9382d;" : ""}">${inner}</div>
+      <div class="today-chip-avatar" style="width:${size}px; height:${size}px; font-size:${fontSize}px; ${bg}${absent ? " box-shadow:0 0 0 2px #c9382d;" : ""}">${inner}</div>
       ${dot}
     </span>
   `;
