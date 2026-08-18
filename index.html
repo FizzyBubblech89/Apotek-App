@@ -464,22 +464,6 @@
           <div class="nav-label">Frånvaro</div>
           <div class="nav-sub">Sjukanmälan</div>
         </div>
-
-        <div class="nav-card disabled">
-          <div class="nav-icon nav-icon-c5">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 5H20V16H8L4 20V5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
-          </div>
-          <div class="nav-label">Meddelanden</div>
-          <span class="badge-soon">Kommer snart</span>
-        </div>
-
-        <div class="nav-card disabled">
-          <div class="nav-icon nav-icon-c6">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M7 8H17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M7 12H17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M7 16H12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="3" y="4" width="18" height="16" rx="3" stroke="currentColor" stroke-width="1.7"/></svg>
-          </div>
-          <div class="nav-label">Bytespass</div>
-          <span class="badge-soon">Kommer snart</span>
-        </div>
       </div>
     </div>
   </div>
@@ -933,6 +917,8 @@ async function logout() {
   document.getElementById("view-franvaro").style.display = "none";
   document.getElementById("view-traning").style.display = "none";
   document.getElementById("view-tasks").style.display = "none";
+  document.getElementById("view-reklamation").style.display = "none";
+  document.getElementById("view-inkop").style.display = "none";
   document.getElementById("view-login").style.display = "block";
   await renderLoginScreen();
 }
@@ -1003,7 +989,7 @@ async function renderHomeForUser(user) {
     const unreviewedCount = isChef ? (kassaFlaggedRes.data || []).filter(r => Math.abs(Number(r.kassadifferens)) > 200).length : 0;
     kassaCardWrap.innerHTML = `
       <div class="nav-card ${unreviewedCount > 0 ? "nav-card-alert" : ""}" onclick="showKassa()">
-        <div class="nav-icon">${kassaIcon}</div>
+        <div class="nav-icon" style="${unreviewedCount > 0 ? "" : "background:linear-gradient(150deg, #38bdf8, #0284c7); color:#fff;"}">${kassaIcon}</div>
         <div class="nav-label">Kassaredovisning</div>
         <div class="nav-sub">${unreviewedCount > 0 ? `⚠️ ${unreviewedCount} stor${unreviewedCount === 1 ? "" : "a"} differens${unreviewedCount === 1 ? "" : "er"}` : "Daglig avstämning"}</div>
       </div>
@@ -1016,7 +1002,7 @@ async function renderHomeForUser(user) {
     if (isChef) {
       tasksCardWrap.innerHTML = `
         <div class="nav-card" onclick="showTasks()">
-          <div class="nav-icon">${clipboardIcon}</div>
+          <div class="nav-icon nav-icon-c6">${clipboardIcon}</div>
           <div class="nav-label">Tilldela uppgift</div>
           <div class="nav-sub">Rikta mot en person</div>
         </div>
@@ -1025,7 +1011,7 @@ async function renderHomeForUser(user) {
       const count = (tasksCountRes.data || []).length;
       tasksCardWrap.innerHTML = `
         <div class="nav-card ${count > 0 ? "nav-card-alert" : ""}" onclick="showTasks()">
-          <div class="nav-icon">${clipboardIcon}</div>
+          <div class="nav-icon" style="${count > 0 ? "" : "background:linear-gradient(150deg, #a78bfa, #7c3aed); color:#fff;"}">${clipboardIcon}</div>
           <div class="nav-label">Uppgifter</div>
           <div class="nav-sub">${count > 0 ? `${count} väntar` : "Inga väntar"}</div>
         </div>
@@ -1051,7 +1037,7 @@ async function renderHomeForUser(user) {
     const { data: pendingInkop } = await sb.from("inkop").select("id").eq("bestalld", false);
     const count = (pendingInkop || []).length;
     inkopCardWrap.innerHTML = `
-      <div class="nav-card" onclick="showInkop()">
+      <div class="nav-card ${count > 0 ? "nav-card-alert" : ""}" onclick="showInkop()">
         <div class="nav-icon nav-icon-c5">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 6H20L18 15H6L4 6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4 6L3.2 3H1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="8" cy="19" r="1.4" fill="currentColor"/><circle cx="17" cy="19" r="1.4" fill="currentColor"/></svg>
         </div>
@@ -1904,7 +1890,10 @@ async function showHome() {
   document.getElementById("view-franvaro").style.display = "none";
   document.getElementById("view-traning").style.display = "none";
   document.getElementById("view-tasks").style.display = "none";
+  document.getElementById("view-reklamation").style.display = "none";
+  document.getElementById("view-inkop").style.display = "none";
   document.getElementById("view-home").style.display = "block";
+  window.scrollTo(0, 0);
   const user = getCurrentUser();
   if (user) await renderHomeForUser(user);
 }
@@ -3210,7 +3199,7 @@ function renderInkopView() {
     ${isChef() ? `<button class="btn-secondary" onclick="openInkopMallarModal()">⚙️ Hantera vanliga varor</button>` : ""}
 
     <div class="field-group" style="margin-top:16px;">
-      <input class="field-input" type="text" placeholder="🔍 Sök på vad som ska beställas..." oninput="setInkopSearch(this.value)">
+      <input class="field-input" type="text" placeholder="🔍 Sök på vad som ska beställas..." value="${inkopSearchQuery}" oninput="setInkopSearch(this.value)">
     </div>
 
     <div class="view-toggle">
