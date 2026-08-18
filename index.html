@@ -43,7 +43,22 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     min-height: 100vh;
   }
-  .app { max-width: 480px; margin: 0 auto; min-height: 100vh; background: var(--white); box-shadow: var(--shadow-lg); position: relative; display: flex; flex-direction: column; }
+  .app {
+    max-width: 480px; margin: 0 auto; min-height: 100vh; background: var(--white); box-shadow: var(--shadow-lg);
+    position: relative; display: flex; flex-direction: column; overflow-x: hidden;
+  }
+  .app::before, .app::after {
+    content: ""; position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; z-index: 0;
+  }
+  .app::before {
+    width: 260px; height: 260px; top: -80px; right: -100px;
+    background: radial-gradient(circle, rgba(52,211,153,0.35), transparent 70%);
+  }
+  .app::after {
+    width: 300px; height: 300px; bottom: 10%; left: -120px;
+    background: radial-gradient(circle, rgba(56,189,248,0.22), transparent 70%);
+  }
+  .app > * { position: relative; z-index: 1; }
 
   /* ---- Top bar ---- */
   .topbar {
@@ -75,8 +90,8 @@
 
   .topbar.with-back { display: flex; align-items: center; gap: 12px; padding: 18px 16px; border-radius: 0 0 18px 18px; }
   .back-btn {
-    background: rgba(255,255,255,0.15);
-    border: none; color: var(--white); width: 36px; height: 36px; border-radius: 10px;
+    background: rgba(255,255,255,0.18); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.25); color: var(--white); width: 36px; height: 36px; border-radius: 10px;
     display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
   }
   .back-btn:hover { background: rgba(255,255,255,0.25); }
@@ -142,12 +157,12 @@
   /* Explicita färgklasser istället för nth-of-type — rutnätet blandar
      .nav-card med osynliga platshållar-divar för de JS-genererade korten,
      vilket gjorde positionsräkningen opålitlig. */
-  .nav-icon-c1 { background: linear-gradient(150deg, #34d399, #059669) !important; color: #fff !important; }
-  .nav-icon-c2 { background: linear-gradient(150deg, #38bdf8, #0284c7) !important; color: #fff !important; }
-  .nav-icon-c3 { background: linear-gradient(150deg, #fb7185, #e11d48) !important; color: #fff !important; }
-  .nav-icon-c4 { background: linear-gradient(150deg, #a78bfa, #7c3aed) !important; color: #fff !important; }
-  .nav-icon-c5 { background: linear-gradient(150deg, #fbbf24, #d97706) !important; color: #fff !important; }
-  .nav-icon-c6 { background: linear-gradient(150deg, #2dd4bf, #0d9488) !important; color: #fff !important; }
+  .nav-icon-c1 { background: linear-gradient(150deg, #34d399, #059669) !important; color: #fff !important; box-shadow: 0 6px 16px -2px rgba(5,150,105,0.5) !important; }
+  .nav-icon-c2 { background: linear-gradient(150deg, #38bdf8, #0284c7) !important; color: #fff !important; box-shadow: 0 6px 16px -2px rgba(2,132,199,0.5) !important; }
+  .nav-icon-c3 { background: linear-gradient(150deg, #fb7185, #e11d48) !important; color: #fff !important; box-shadow: 0 6px 16px -2px rgba(225,29,72,0.5) !important; }
+  .nav-icon-c4 { background: linear-gradient(150deg, #a78bfa, #7c3aed) !important; color: #fff !important; box-shadow: 0 6px 16px -2px rgba(124,58,237,0.5) !important; }
+  .nav-icon-c5 { background: linear-gradient(150deg, #fbbf24, #d97706) !important; color: #fff !important; box-shadow: 0 6px 16px -2px rgba(217,119,6,0.5) !important; }
+  .nav-icon-c6 { background: linear-gradient(150deg, #2dd4bf, #0d9488) !important; color: #fff !important; box-shadow: 0 6px 16px -2px rgba(13,148,136,0.5) !important; }
   .nav-label { font-size: 14.5px; font-weight: 700; color: var(--ink); font-family: var(--font-display); }
   .nav-sub { font-size: 11.5px; color: var(--muted); }
   .nav-card.primary .nav-sub { color: rgba(255,255,255,0.75); }
@@ -360,14 +375,15 @@
   .kassa-row-list { background: linear-gradient(150deg, #ffffff, #d9f0e2); border: 1px solid var(--green-300); border-radius: 18px; overflow: hidden; box-shadow: 0 3px 12px rgba(11,61,46,0.07); }
 
   .kassa-modal-overlay {
-    position: fixed; inset: 0; background: rgba(11,61,46,0.45); backdrop-filter: blur(3px); z-index: 100;
+    position: fixed; inset: 0; background: rgba(11,61,46,0.55); backdrop-filter: blur(10px) saturate(1.4); -webkit-backdrop-filter: blur(10px) saturate(1.4); z-index: 100;
     display: flex; align-items: center; justify-content: center; padding: 24px;
     animation: overlayFade 0.18s ease;
   }
   @keyframes overlayFade { from { opacity: 0; } to { opacity: 1; } }
   .kassa-modal-card {
-    background: var(--white); border-radius: 18px; padding: 20px; width: 100%; max-width: 340px;
-    box-shadow: var(--shadow-lg); max-height: 85vh; overflow-y: auto;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.6); border-radius: 22px; padding: 20px; width: 100%; max-width: 340px;
+    box-shadow: 0 24px 60px -12px rgba(11,61,46,0.35), 0 8px 24px rgba(11,61,46,0.15); max-height: 85vh; overflow-y: auto;
     animation: modalPop 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
   }
   @keyframes modalPop { from { opacity: 0; transform: scale(0.94) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
