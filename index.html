@@ -3125,6 +3125,7 @@ function emptyReklamationDraft() {
     varaHosKund: "", ersattning: "", villHaAterkoppling: "",
     kundNamn: "", kundKontakt: "", inkopsstalle: "", arendeNummer: "",
     lagersaldoKorrigeras: "", utfortDatumSignum: "", leverantor: "", begartKreditering: "",
+    bildUrl: "", bildFile: null,
   };
 }
 
@@ -3256,7 +3257,16 @@ function renderReklamationFormFields() {
       <input class="field-input" type="text" value="${reklamationDraft.leverantor}" oninput="reklamationDraft.leverantor = this.value">
     </div>
     ${reklamationYesNoField("Begärt kreditering av leverantör?", "begartKreditering", "OBS orsak till reklamation ska finnas med")}
+
+    <div class="field-group">
+      <label class="field-label">Bild (valfritt)</label>
+      <input class="field-input" id="reklamation-bild-input" type="file" accept="image/*">
+      ${reklamationDraft.bildFile ? `<div style="font-size:11px; color:var(--green-700); margin-top:4px;">✔ ${reklamationDraft.bildFile.name} vald</div>` : ""}
+    </div>
   `;
+  document.getElementById("reklamation-bild-input").addEventListener("change", (ev) => {
+    reklamationDraft.bildFile = ev.target.files[0] || null;
+  });
 }
 
 function reklamationYesNoField(label, field, note) {
@@ -3286,13 +3296,25 @@ async function submitReklamation() {
   if (!d.varunamn.trim()) { errorBox.textContent = "Fyll i varunamn."; return; }
   if (!d.orsak.trim()) { errorBox.textContent = "Fyll i orsak till reklamationen."; return; }
   const user = getCurrentUser();
+
+  let bildUrl = "";
+  if (d.bildFile) {
+    errorBox.textContent = "Laddar upp bild…";
+    const ext = (d.bildFile.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${user.id}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await sb.storage.from("reklamationer").upload(path, d.bildFile);
+    if (uploadError) { errorBox.textContent = "Kunde inte ladda upp bilden: " + uploadError.message; return; }
+    const { data: publicUrlData } = sb.storage.from("reklamationer").getPublicUrl(path);
+    bildUrl = publicUrlData.publicUrl;
+  }
+
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("reklamationer").insert({
     datum: d.datum, medarbetare_signum: d.medarbetareSignum, varunamn: d.varunamn.trim(), varunummer: d.varunummer,
     orsak: d.orsak.trim(), vara_hos_kund: d.varaHosKund, ersattning: d.ersattning, vill_ha_aterkoppling: d.villHaAterkoppling,
     kund_namn: d.kundNamn, kund_kontakt: d.kundKontakt, inkopsstalle: d.inkopsstalle, arende_nummer: d.arendeNummer,
     lagersaldo_korrigeras: d.lagersaldoKorrigeras, utfort_datum_signum: d.utfortDatumSignum, leverantor: d.leverantor,
-    begart_kreditering: d.begartKreditering, created_by: user.id,
+    begart_kreditering: d.begartKreditering, bild_url: bildUrl, created_by: user.id,
   });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("reklamation-new-overlay");
@@ -3302,9 +3324,18 @@ async function submitReklamation() {
   renderReklamationView();
 }
 
+function canEditReklamation(r) {
+  if (!r.hanterad) return true;
+  const user = getCurrentUser();
+  if (!user) return false;
+  return user.role === "chef" || (user.roll_funktioner || []).includes("VA");
+}
+
 function openReklamationDetail(id) {
   const r = reklamationCache.find(x => x.id === id);
   if (!r) return;
+  const editable = canEditReklamation(r);
+
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "reklamation-detail-overlay";
@@ -3312,65 +3343,160 @@ function openReklamationDetail(id) {
   overlay.innerHTML = `
     <div class="kassa-modal-card">
       <div class="kassa-modal-title">${r.varunamn}</div>
-      <div style="font-size:12px; color:var(--muted); margin-bottom:14px;">
-        ${fmtSvFull(r.datum)} · ${r.medarbetare_signum}${r.varunummer ? ` · Varunr: ${r.varunummer}` : ""}
+      ${!editable ? `<div style="background:#fff3e6; color:#b5590a; font-size:12px; font-weight:700; padding:8px 12px; border-radius:10px; margin-bottom:14px;">🔒 Den här reklamationen är hanterad. Endast VA eller chef kan redigera den vidare.</div>` : ""}
+
+      <button class="btn-secondary" onclick="exportReklamationPdf('${id}')" style="margin-bottom:16px;">📄 Exportera PDF</button>
+
+      <div class="kassa-section-title" style="margin-top:0;">Del 1</div>
+      ${reklamationDetailField("Datum", "rekl-datum", r.datum, editable, "date")}
+      ${reklamationDetailField("Namn (medarbetare)", "rekl-medarbetare", r.medarbetare_signum, editable)}
+      ${reklamationDetailField("Varunamn", "rekl-varunamn", r.varunamn, editable)}
+      ${reklamationDetailField("Varunummer / Varuid", "rekl-varunummer", r.varunummer, editable)}
+      ${reklamationDetailField("Orsak till reklamationen", "rekl-orsak", r.orsak, editable, "textarea")}
+      ${reklamationDetailField("Har varan varit ute hos kund? (ja/nej)", "rekl-vara-hos-kund", r.vara_hos_kund, editable)}
+      ${reklamationDetailField("Hur har varan blivit ersatt?", "rekl-ersattning", r.ersattning, editable)}
+      ${reklamationDetailField("Vill kund ha återkoppling? (ja/nej)", "rekl-vill-atrekoppling", r.vill_ha_aterkoppling, editable)}
+      ${reklamationDetailField("Kundens namn", "rekl-kund-namn", r.kund_namn, editable)}
+      ${reklamationDetailField("Kunds kontaktuppgifter", "rekl-kund-kontakt", r.kund_kontakt, editable)}
+      ${reklamationDetailField("Vart är varan inköpt?", "rekl-inkopsstalle", r.inkopsstalle, editable)}
+      ${reklamationDetailField("Ärende-/referensnummer", "rekl-arende", r.arende_nummer, editable)}
+      ${reklamationDetailField("Ska lagersaldo korrigeras? (ja/nej)", "rekl-lagersaldo", r.lagersaldo_korrigeras, editable)}
+      ${reklamationDetailField("Utfört datum/signum", "rekl-utfort", r.utfort_datum_signum, editable)}
+      ${reklamationDetailField("Leverantör", "rekl-leverantor", r.leverantor, editable)}
+      ${reklamationDetailField("Begärt kreditering av leverantör? (ja/nej)", "rekl-kreditering", r.begart_kreditering, editable)}
+
+      <div class="field-group">
+        <label class="field-label">Bild</label>
+        ${r.bild_url ? `<img src="${r.bild_url}" style="width:100%; border-radius:12px; margin-bottom:8px;">` : `<div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Ingen bild uppladdad.</div>`}
+        ${editable ? `<input class="field-input" id="rekl-bild-input" type="file" accept="image/*">` : ""}
       </div>
-      <div class="kassa-modal-row"><span class="kassa-modal-label">Orsak</span></div>
-      <div style="font-size:13px; white-space:pre-wrap; margin-bottom:10px;">${r.orsak}</div>
-      ${r.kund_namn ? `<div class="kassa-modal-row"><span class="kassa-modal-label">Kund</span><span>${r.kund_namn}</span></div>` : ""}
-      ${r.arende_nummer ? `<div class="kassa-modal-row"><span class="kassa-modal-label">Ärendenr</span><span>${r.arende_nummer}</span></div>` : ""}
-      ${r.leverantor ? `<div class="kassa-modal-row"><span class="kassa-modal-label">Leverantör</span><span>${r.leverantor}</span></div>` : ""}
 
       <div class="kassa-section-title">Del 2 — Fortsatt dokumentation</div>
-      <div class="field-group">
-        <label class="field-label">Vad händer vidare med varan? (t.ex. frågor/mail från tillverkare)</label>
-        <textarea class="field-input" id="rekl-vad-hander" style="min-height:60px;">${r.vad_hander_vidare || ""}</textarea>
-      </div>
-      <div class="field-group">
-        <label class="field-label">Varan inskickad, datum & signum</label>
-        <input class="field-input" id="rekl-inskickad" type="text" value="${r.vara_inskickad || ""}">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Varan destruerad, datum & signum</label>
-        <input class="field-input" id="rekl-destruerad" type="text" value="${r.vara_destruerad || ""}">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Eventuell återkoppling till kund, datum & signum</label>
-        <input class="field-input" id="rekl-aterkoppling" type="text" value="${r.aterkoppling_kund || ""}">
-      </div>
+      ${reklamationDetailField("Vad händer vidare med varan?", "rekl-vad-hander", r.vad_hander_vidare, editable, "textarea")}
+      ${reklamationDetailField("Varan inskickad, datum & signum", "rekl-inskickad", r.vara_inskickad, editable)}
+      ${reklamationDetailField("Varan destruerad, datum & signum", "rekl-destruerad", r.vara_destruerad, editable)}
+      ${reklamationDetailField("Eventuell återkoppling till kund, datum & signum", "rekl-aterkoppling", r.aterkoppling_kund, editable)}
 
-      <label class="kassa-check-row" style="border:1px solid var(--line); border-radius:12px; margin-bottom:14px;">
-        <input type="checkbox" id="rekl-hanterad" ${r.hanterad ? "checked" : ""}>
+      <label class="kassa-check-row" style="border:1px solid var(--line); border-radius:12px; margin-bottom:14px; ${editable ? "" : "opacity:0.6;"}">
+        <input type="checkbox" id="rekl-hanterad" ${r.hanterad ? "checked" : ""} ${editable ? "" : "disabled"}>
         <span class="kassa-check-name" style="font-weight:700;">✔ Reklamation hanterad</span>
       </label>
 
       <div id="reklamation-detail-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
-      <button class="btn-primary" onclick="saveReklamationDetail('${id}')">Spara</button>
+      ${editable ? `<button class="btn-primary" onclick="saveReklamationDetail('${id}')">Spara</button>` : ""}
       <button class="btn-secondary" onclick="document.getElementById('reklamation-detail-overlay').remove()">Stäng</button>
     </div>
   `;
   document.body.appendChild(overlay);
 }
 
+function reklamationDetailField(label, id, value, editable, type) {
+  value = value || "";
+  if (!editable) {
+    return `<div class="kassa-modal-row" style="align-items:flex-start;"><span class="kassa-modal-label">${label}</span><span style="text-align:right; white-space:pre-wrap;">${value || "–"}</span></div>`;
+  }
+  if (type === "textarea") {
+    return `<div class="field-group"><label class="field-label">${label}</label><textarea class="field-input" id="${id}" style="min-height:60px;">${value}</textarea></div>`;
+  }
+  if (type === "date") {
+    return `<div class="field-group"><label class="field-label">${label}</label><input class="field-input" id="${id}" type="date" value="${value}"></div>`;
+  }
+  return `<div class="field-group"><label class="field-label">${label}</label><input class="field-input" id="${id}" type="text" value="${value}"></div>`;
+}
+
 async function saveReklamationDetail(id) {
   const errorBox = document.getElementById("reklamation-detail-error");
+  const val = (elId) => { const el = document.getElementById(elId); return el ? el.value : undefined; };
+
+  let bildUrl;
+  const bildInput = document.getElementById("rekl-bild-input");
+  if (bildInput && bildInput.files && bildInput.files[0]) {
+    errorBox.textContent = "Laddar upp bild…";
+    const user = getCurrentUser();
+    const file = bildInput.files[0];
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${user.id}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await sb.storage.from("reklamationer").upload(path, file);
+    if (uploadError) { errorBox.textContent = "Kunde inte ladda upp bilden: " + uploadError.message; return; }
+    const { data: publicUrlData } = sb.storage.from("reklamationer").getPublicUrl(path);
+    bildUrl = publicUrlData.publicUrl;
+  }
+
   const patch = {
-    vad_hander_vidare: document.getElementById("rekl-vad-hander").value,
-    vara_inskickad: document.getElementById("rekl-inskickad").value,
-    vara_destruerad: document.getElementById("rekl-destruerad").value,
-    aterkoppling_kund: document.getElementById("rekl-aterkoppling").value,
+    datum: val("rekl-datum"), medarbetare_signum: val("rekl-medarbetare"), varunamn: val("rekl-varunamn"),
+    varunummer: val("rekl-varunummer"), orsak: val("rekl-orsak"), vara_hos_kund: val("rekl-vara-hos-kund"),
+    ersattning: val("rekl-ersattning"), vill_ha_aterkoppling: val("rekl-vill-atrekoppling"),
+    kund_namn: val("rekl-kund-namn"), kund_kontakt: val("rekl-kund-kontakt"), inkopsstalle: val("rekl-inkopsstalle"),
+    arende_nummer: val("rekl-arende"), lagersaldo_korrigeras: val("rekl-lagersaldo"), utfort_datum_signum: val("rekl-utfort"),
+    leverantor: val("rekl-leverantor"), begart_kreditering: val("rekl-kreditering"),
+    vad_hander_vidare: val("rekl-vad-hander"), vara_inskickad: val("rekl-inskickad"),
+    vara_destruerad: val("rekl-destruerad"), aterkoppling_kund: val("rekl-aterkoppling"),
     hanterad: document.getElementById("rekl-hanterad").checked,
     updated_at: new Date().toISOString(),
   };
+  if (bildUrl) patch.bild_url = bildUrl;
+  // Ta bara med fält som faktiskt var redigerbara (fanns i formuläret)
+  Object.keys(patch).forEach(k => { if (patch[k] === undefined) delete patch[k]; });
+
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("reklamationer").update(patch).eq("id", id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("reklamation-detail-overlay");
   if (overlay) overlay.remove();
   await loadReklamationer();
-  // Hoppa automatiskt till rätt flik så man ser att den flyttades
   reklamationTab = patch.hanterad ? "avslutade" : "pagaende";
   renderReklamationView();
+}
+
+function exportReklamationPdf(id) {
+  const r = reklamationCache.find(x => x.id === id);
+  if (!r || !window.jspdf) { alert("PDF-biblioteket kunde inte laddas."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 18;
+
+  doc.setFontSize(16);
+  doc.text("Reklamation", 14, y); y += 8;
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text("Referensdokument C411 — Apotek Hjärtat Vällingbygången", 14, y); y += 10;
+  doc.setTextColor(0);
+
+  const rows = [
+    ["Datum", fmtSvShort(r.datum)], ["Medarbetare", r.medarbetare_signum],
+    ["Varunamn", r.varunamn], ["Varunummer/Varuid", r.varunummer],
+    ["Orsak", r.orsak], ["Varan hos kund", r.vara_hos_kund],
+    ["Ersättning", r.ersattning], ["Vill ha återkoppling", r.vill_ha_aterkoppling],
+    ["Kundens namn", r.kund_namn], ["Kunds kontaktuppgifter", r.kund_kontakt],
+    ["Inköpsställe", r.inkopsstalle], ["Ärende-/referensnummer", r.arende_nummer],
+    ["Lagersaldo korrigeras", r.lagersaldo_korrigeras], ["Utfört datum/signum", r.utfort_datum_signum],
+    ["Leverantör", r.leverantor], ["Begärt kreditering", r.begart_kreditering],
+    ["", ""],
+    ["Del 2", ""],
+    ["Vad händer vidare", r.vad_hander_vidare], ["Varan inskickad", r.vara_inskickad],
+    ["Varan destruerad", r.vara_destruerad], ["Återkoppling till kund", r.aterkoppling_kund],
+    ["Status", r.hanterad ? "Hanterad" : "Pågående"],
+  ];
+
+  doc.setFontSize(10);
+  rows.forEach(([label, value]) => {
+    if (y > 275) { doc.addPage(); y = 20; }
+    if (!label) { y += 4; return; }
+    if (!value && label !== "Del 2") { doc.setFont(undefined, "normal"); }
+    doc.setFont(undefined, "bold");
+    doc.text(label, 14, y);
+    doc.setFont(undefined, "normal");
+    const lines = doc.splitTextToSize(String(value || "–"), pageWidth - 90);
+    doc.text(lines, 80, y);
+    y += Math.max(7, lines.length * 5.5);
+  });
+
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  doc.text(`Exporterad ${fmtSvFull(isoDate(new Date()))}`, 14, 290);
+
+  doc.save(`reklamation-${(r.varunamn || "okand").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.pdf`);
 }
 
 async function showTasks() {
