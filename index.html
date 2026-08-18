@@ -453,6 +453,8 @@
 
         <div id="nav-card-reklamation"></div>
 
+        <div id="nav-card-inkop"></div>
+
         <div id="nav-card-users"></div>
 
         <div class="nav-card" onclick="showFranvaro()">
@@ -636,6 +638,17 @@
       <div class="title">Reklamation</div>
     </div>
     <div class="kassa-content" id="reklamation-results"></div>
+  </div>
+
+  <!-- INKÖP VIEW -->
+  <div id="view-inkop" style="display:none;">
+    <div class="topbar with-back">
+      <button class="back-btn" onclick="showHome()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="title">Inköp</div>
+    </div>
+    <div class="kassa-content" id="inkop-results"></div>
   </div>
 
 </div>
@@ -1029,6 +1042,21 @@ async function renderHomeForUser(user) {
         </div>
         <div class="nav-label">Reklamation</div>
         <div class="nav-sub">Registrera & hantera</div>
+      </div>
+    `;
+  }
+
+  const inkopCardWrap = document.getElementById("nav-card-inkop");
+  if (inkopCardWrap) {
+    const { data: pendingInkop } = await sb.from("inkop").select("id").eq("bestalld", false);
+    const count = (pendingInkop || []).length;
+    inkopCardWrap.innerHTML = `
+      <div class="nav-card" onclick="showInkop()">
+        <div class="nav-icon nav-icon-c5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 6H20L18 15H6L4 6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4 6L3.2 3H1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="8" cy="19" r="1.4" fill="currentColor"/><circle cx="17" cy="19" r="1.4" fill="currentColor"/></svg>
+        </div>
+        <div class="nav-label">Inköp</div>
+        <div class="nav-sub">${count > 0 ? `${count} att beställa` : "Inget att beställa"}</div>
       </div>
     `;
   }
@@ -3127,6 +3155,247 @@ function emptyReklamationDraft() {
     lagersaldoKorrigeras: "", utfortDatumSignum: "", leverantor: "", begartKreditering: "",
     bildUrl: "", bildFile: null,
   };
+}
+
+/* ---- Inköp ---- */
+let inkopTab = "att-bestalla";
+let inkopCache = [];
+let inkopMallarCache = [];
+let inkopSearchQuery = "";
+let inkopDraft = { vad: "", antal: 1, lank: "" };
+
+function normalizeSearch(s) {
+  return (s || "").toLowerCase().normalize("NFKD").replace(/\s+/g, " ").trim();
+}
+function inkopMatchesSearch(item, query) {
+  const q = normalizeSearch(query);
+  if (!q) return true;
+  const words = q.split(" ").filter(Boolean);
+  const haystack = normalizeSearch(item.vad);
+  return words.every(w => haystack.includes(w));
+}
+
+async function showInkop() {
+  document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-inkop").style.display = "block";
+  inkopTab = "att-bestalla";
+  inkopSearchQuery = "";
+  await loadInkop();
+  renderInkopView();
+}
+
+async function loadInkop() {
+  const [inkopRes, mallarRes] = await Promise.all([
+    sb.from("inkop").select("*").order("created_at", { ascending: false }),
+    sb.from("inkop_mallar").select("*").order("namn", { ascending: true }),
+  ]);
+  inkopCache = inkopRes.data || [];
+  inkopMallarCache = mallarRes.data || [];
+}
+
+function setInkopTab(tab) {
+  inkopTab = tab;
+  renderInkopView();
+}
+
+function setInkopSearch(value) {
+  inkopSearchQuery = value;
+  renderInkopList();
+}
+
+function renderInkopView() {
+  const container = document.getElementById("inkop-results");
+  container.innerHTML = `
+    <button class="btn-primary" onclick="openNewInkopModal()">+ Ny beställning</button>
+    ${isChef() ? `<button class="btn-secondary" onclick="openInkopMallarModal()">⚙️ Hantera vanliga varor</button>` : ""}
+
+    <div class="field-group" style="margin-top:16px;">
+      <input class="field-input" type="text" placeholder="🔍 Sök på vad som ska beställas..." oninput="setInkopSearch(this.value)">
+    </div>
+
+    <div class="view-toggle">
+      <button id="inkop-tab-att-bestalla" onclick="setInkopTab('att-bestalla')">Att beställa</button>
+      <button id="inkop-tab-bestallt" onclick="setInkopTab('bestallt')">Beställt</button>
+    </div>
+    <div id="inkop-list"></div>
+  `;
+  document.getElementById(`inkop-tab-${inkopTab}`).classList.add("active");
+  renderInkopList();
+}
+
+function renderInkopList() {
+  const listWrap = document.getElementById("inkop-list");
+  if (!listWrap) return;
+  const filtered = inkopCache
+    .filter(i => inkopTab === "bestallt" ? i.bestalld : !i.bestalld)
+    .filter(i => inkopMatchesSearch(i, inkopSearchQuery));
+
+  listWrap.innerHTML = filtered.length
+    ? `<div class="kassa-row-list">${filtered.map(i => `
+        <div class="kassa-row" style="align-items:flex-start;">
+          <input type="checkbox" ${i.bestalld ? "checked" : ""} onchange="toggleInkopBestalld('${i.id}', this.checked)" style="margin-top:2px;">
+          <div style="flex:1; min-width:0; margin-left:8px;">
+            <div style="font-weight:700; ${i.bestalld ? "text-decoration:line-through; color:var(--muted);" : ""}">${i.vad}</div>
+            <div style="font-size:11px; color:var(--muted); margin-top:2px;">
+              Antal: ${i.antal}${i.bestalld && i.bestalld_datum ? ` · Beställt ${fmtSvShort(i.bestalld_datum)}` : ""}
+              ${i.lank ? ` · <a href="${i.lank}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--green-700); font-weight:700;">🔗 Beställningssida</a>` : ""}
+            </div>
+          </div>
+          <button class="kr-delete" onclick="deleteInkop('${i.id}')" aria-label="Ta bort">✕</button>
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">${inkopSearchQuery ? "Inga träffar." : (inkopTab === "bestallt" ? "Inget beställt ännu." : "Inget att beställa just nu.")}</div>`;
+}
+
+function openNewInkopModal() {
+  inkopDraft = { vad: "", antal: 1, lank: "" };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "inkop-new-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Ny beställning</div>
+      ${inkopMallarCache.length ? `
+        <div class="field-group">
+          <label class="field-label">Välj från vanliga varor (valfritt)</label>
+          <select class="field-input" onchange="selectInkopMall(this.value)">
+            <option value="">Skriv fritt istället...</option>
+            ${inkopMallarCache.map(m => `<option value="${m.id}">${m.namn}</option>`).join("")}
+          </select>
+        </div>
+      ` : ""}
+      <div class="field-group">
+        <label class="field-label">Vad ska beställas?</label>
+        <input class="field-input" id="inkop-vad-input" type="text" value="${inkopDraft.vad}" oninput="inkopDraft.vad = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Antal</label>
+        <input class="field-input" type="number" inputmode="numeric" min="1" value="${inkopDraft.antal}" oninput="inkopDraft.antal = parseInt(this.value) || 1">
+      </div>
+      <div id="inkop-new-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:8px 0;"></div>
+      <button class="btn-primary" onclick="submitInkop()">Lägg till</button>
+      <button class="btn-secondary" onclick="document.getElementById('inkop-new-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function selectInkopMall(mallId) {
+  const mall = inkopMallarCache.find(m => m.id === mallId);
+  if (!mall) return;
+  inkopDraft.vad = mall.namn;
+  inkopDraft.lank = mall.lank || "";
+  const input = document.getElementById("inkop-vad-input");
+  if (input) input.value = mall.namn;
+}
+
+async function submitInkop() {
+  const errorBox = document.getElementById("inkop-new-error");
+  if (!inkopDraft.vad.trim()) { errorBox.textContent = "Skriv vad som ska beställas."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("inkop").insert({
+    vad: inkopDraft.vad.trim(), antal: inkopDraft.antal || 1, lank: inkopDraft.lank || "", created_by: user.id,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("inkop-new-overlay");
+  if (overlay) overlay.remove();
+  await loadInkop();
+  renderInkopView();
+}
+
+async function toggleInkopBestalld(id, checked) {
+  const user = getCurrentUser();
+  const patch = checked
+    ? { bestalld: true, bestalld_datum: isoDate(new Date()), bestalld_av: user.id }
+    : { bestalld: false, bestalld_datum: null, bestalld_av: null };
+  const { error } = await sb.from("inkop").update(patch).eq("id", id);
+  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
+  await loadInkop();
+  renderInkopView();
+}
+
+function deleteInkop(id) {
+  const item = inkopCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort inköp?",
+    `<strong>${item ? item.vad : "Posten"}</strong> tas bort permanent. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("inkop").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadInkop();
+      renderInkopView();
+    }
+  );
+}
+
+/* ---- Chefens mallar (förbestämda varor med ev. länk) ---- */
+function openInkopMallarModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "inkop-mallar-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Vanliga varor</div>
+      <div class="field-group">
+        <label class="field-label">Namn</label>
+        <input class="field-input" id="inkop-mall-namn" type="text" placeholder="T.ex. Kassakvitton">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Länk till beställningssida (valfritt)</label>
+        <input class="field-input" id="inkop-mall-lank" type="text" placeholder="https://...">
+      </div>
+      <div id="inkop-mall-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitInkopMall()">Lägg till vara</button>
+
+      <div class="kassa-section-title" style="margin-top:20px;">Befintliga</div>
+      <div id="inkop-mallar-list"></div>
+      <button class="btn-secondary" onclick="document.getElementById('inkop-mallar-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  renderInkopMallarList();
+}
+
+function renderInkopMallarList() {
+  const wrap = document.getElementById("inkop-mallar-list");
+  if (!wrap) return;
+  wrap.innerHTML = inkopMallarCache.length
+    ? `<div class="kassa-row-list">${inkopMallarCache.map(m => `
+        <div class="kassa-row" style="cursor:default;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700;">${m.namn}</div>
+            ${m.lank ? `<div style="font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.lank}</div>` : ""}
+          </div>
+          <button class="kr-delete" onclick="deleteInkopMall('${m.id}')" aria-label="Ta bort">✕</button>
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">Inga vanliga varor tillagda ännu.</div>`;
+}
+
+async function submitInkopMall() {
+  const namn = document.getElementById("inkop-mall-namn").value.trim();
+  const lank = document.getElementById("inkop-mall-lank").value.trim();
+  const errorBox = document.getElementById("inkop-mall-error");
+  if (!namn) { errorBox.textContent = "Skriv ett namn."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("inkop_mallar").insert({ namn, lank, created_by: user.id });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  document.getElementById("inkop-mall-namn").value = "";
+  document.getElementById("inkop-mall-lank").value = "";
+  errorBox.textContent = "";
+  await loadInkop();
+  renderInkopMallarList();
+}
+
+async function deleteInkopMall(id) {
+  const { error } = await sb.from("inkop_mallar").delete().eq("id", id);
+  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+  await loadInkop();
+  renderInkopMallarList();
 }
 
 async function showReklamation() {
