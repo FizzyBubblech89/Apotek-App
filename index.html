@@ -3540,7 +3540,7 @@ function renderKampanjView() {
   const listWrap = document.getElementById("kampanj-list");
   listWrap.innerHTML = list.length
     ? `<div class="kassa-row-list">${list.map(k => `
-        <div class="kassa-row" onclick="window.open('${k.pdf_url}', '_blank', 'noopener')">
+        <div class="kassa-row" onclick="openKampanjPreview('${k.id}')">
           <div style="flex:1; min-width:0;">
             <div style="font-weight:700;">📄 ${k.titel}</div>
             <div style="font-size:11px; color:var(--muted); margin-top:2px;">${kampanjTab === "tidigare" ? "Gällde t.o.m." : "Gäller t.o.m."} ${fmtSvFull(k.datum)}</div>
@@ -3572,6 +3572,7 @@ function openNewKampanjModal() {
       <div class="field-group">
         <label class="field-label">PDF-fil</label>
         <input class="field-input" id="kampanj-file-input" type="file" accept="application/pdf">
+        <div id="kampanj-file-confirm" style="font-size:11px; color:var(--green-700); margin-top:4px; font-weight:700;"></div>
       </div>
       <div id="kampanj-new-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:8px 0;"></div>
       <button class="btn-primary" onclick="submitKampanj()">Ladda upp</button>
@@ -3581,6 +3582,7 @@ function openNewKampanjModal() {
   document.body.appendChild(overlay);
   document.getElementById("kampanj-file-input").addEventListener("change", (ev) => {
     kampanjDraft.file = ev.target.files[0] || null;
+    document.getElementById("kampanj-file-confirm").textContent = kampanjDraft.file ? `✔ ${kampanjDraft.file.name} vald` : "";
   });
 }
 
@@ -3617,6 +3619,25 @@ async function submitKampanj() {
   if (overlay) overlay.remove();
   await loadKampanjer();
   renderKampanjView();
+}
+
+function openKampanjPreview(id) {
+  const k = kampanjCache.find(x => x.id === id);
+  if (!k) return;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "kampanj-preview-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card" style="max-width:480px; width:92vw;">
+      <div class="kassa-modal-title" style="margin-bottom:10px;">${k.titel}</div>
+      <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Gäller t.o.m. ${fmtSvFull(k.datum)}</div>
+      <iframe src="${k.pdf_url}" style="width:100%; height:60vh; border:1px solid var(--line); border-radius:12px; background:var(--white);"></iframe>
+      <button class="btn-secondary" onclick="window.open('${k.pdf_url}', '_blank', 'noopener')" style="margin-top:12px;">↗ Öppna i ny flik</button>
+      <button class="btn-secondary" onclick="document.getElementById('kampanj-preview-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
 }
 
 function deleteKampanj(id) {
