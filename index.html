@@ -3540,9 +3540,12 @@ function renderKampanjView() {
   const listWrap = document.getElementById("kampanj-list");
   listWrap.innerHTML = list.length
     ? `<div class="kassa-row-list">${list.map(k => `
-        <div class="kassa-row" onclick="openKampanjPreview('${k.id}')">
-          <div style="flex:1; min-width:0;">
-            <div style="font-weight:700;">📄 ${k.titel}</div>
+        <div class="kassa-row" onclick="openKampanjPreview('${k.id}')" style="align-items:center;">
+          <div style="width:52px; height:52px; border-radius:10px; overflow:hidden; border:1px solid var(--line); flex-shrink:0; background:var(--white); position:relative;">
+            <iframe src="${k.pdf_url}#toolbar=0&navpanes=0&scrollbar=0" style="width:208px; height:208px; transform:scale(0.25); transform-origin:0 0; border:none; pointer-events:none;" loading="lazy"></iframe>
+          </div>
+          <div style="flex:1; min-width:0; margin-left:10px;">
+            <div style="font-weight:700;">${k.titel}</div>
             <div style="font-size:11px; color:var(--muted); margin-top:2px;">${kampanjTab === "tidigare" ? "Gällde t.o.m." : "Gäller t.o.m."} ${fmtSvFull(k.datum)}</div>
           </div>
           ${isChef() ? `<button class="kr-delete" onclick="event.stopPropagation(); deleteKampanj('${k.id}')" aria-label="Ta bort">✕</button>` : ""}
