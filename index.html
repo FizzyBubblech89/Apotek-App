@@ -681,6 +681,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 // ============================================================
 // SUPABASE-KONFIGURATION — fyll i dessa två efter att du skapat
@@ -3509,6 +3510,39 @@ async function showKampanj() {
   renderKampanjView();
 }
 
+/* Renderar PDF:ens första sida som en riktig bild (canvas) istället för
+   att lita på webbläsarens inbyggda PDF-visare i en iframe — mobilens
+   PDF-visare (särskilt Safari på iPhone) respekterar inte alltid
+   zoom-parametrar i webbadressen, vilket gjorde att förhandsvisningen
+   kunde visas inzoomad/beskuren. Med en egen bild slipper vi det helt. */
+if (typeof pdfjsLib !== "undefined") {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
+async function renderPdfThumbnail(pdfUrl, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container || typeof pdfjsLib === "undefined") return;
+  try {
+    const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+    const page = await pdf.getPage(1);
+    const targetWidth = container.clientWidth || 320;
+    const unscaled = page.getViewport({ scale: 1 });
+    const scale = (targetWidth * 2) / unscaled.width; // 2x för skärpa
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    canvas.style.width = "100%";
+    canvas.style.height = "auto";
+    canvas.style.display = "block";
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    container.innerHTML = "";
+    container.appendChild(canvas);
+  } catch (err) {
+    console.error("Kunde inte rendera PDF-förhandsvisning", err);
+    if (container) container.innerHTML = `<div style="display:flex; align-items:center; justify-content:center; height:100%; color:var(--muted); font-size:11px; text-align:center; padding:12px;">Kunde inte visa förhandsvisning</div>`;
+  }
+}
+
 async function loadKampanjer() {
   const { data, error } = await sb.from("kampanjer").select("*").order("datum", { ascending: false });
   kampanjCache = error ? [] : data;
@@ -3541,8 +3575,8 @@ function renderKampanjView() {
   listWrap.innerHTML = list.length
     ? list.map(k => `
         <div style="background:var(--white); border:1px solid var(--line); border-radius:16px; overflow:hidden; margin-bottom:14px; box-shadow:0 3px 12px rgba(11,61,46,0.07); cursor:pointer;" onclick="openKampanjPreview('${k.id}')">
-          <div style="width:100%; aspect-ratio:4/3; background:var(--green-050); position:relative; overflow:hidden;">
-            <iframe src="${k.pdf_url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH&zoom=page-fit" style="width:100%; height:100%; border:none; pointer-events:none;" loading="lazy"></iframe>
+          <div id="kampanj-thumb-${k.id}" style="width:100%; min-height:160px; background:var(--green-050); display:flex; align-items:center; justify-content:center;">
+            <span style="color:var(--muted); font-size:11px;">Laddar förhandsvisning…</span>
           </div>
           <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px;">
             <div style="min-width:0;">
@@ -3554,6 +3588,8 @@ function renderKampanjView() {
         </div>
       `).join("")
     : `<div class="empty-state">Inga ${kampanjTab === "tidigare" ? "tidigare" : "aktuella"} kampanjer.</div>`;
+
+  list.forEach(k => renderPdfThumbnail(k.pdf_url, `kampanj-thumb-${k.id}`));
 }
 
 function openNewKampanjModal() {
@@ -3637,12 +3673,15 @@ function openKampanjPreview(id) {
     <div class="kassa-modal-card" style="max-width:480px; width:92vw;">
       <div class="kassa-modal-title" style="margin-bottom:10px;">${k.titel}</div>
       <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Gäller t.o.m. ${fmtSvFull(k.datum)}</div>
-      <iframe src="${k.pdf_url}#view=FitH&zoom=page-fit" style="width:100%; height:60vh; border:1px solid var(--line); border-radius:12px; background:var(--white);"></iframe>
+      <div id="kampanj-preview-thumb" style="width:100%; min-height:300px; max-height:65vh; overflow-y:auto; background:var(--green-050); border:1px solid var(--line); border-radius:12px; display:flex; align-items:center; justify-content:center;">
+        <span style="color:var(--muted); font-size:11px;">Laddar förhandsvisning…</span>
+      </div>
       <button class="btn-secondary" onclick="window.open('${k.pdf_url}', '_blank', 'noopener')" style="margin-top:12px;">↗ Öppna i ny flik</button>
       <button class="btn-secondary" onclick="document.getElementById('kampanj-preview-overlay').remove()">Stäng</button>
     </div>
   `;
   document.body.appendChild(overlay);
+  renderPdfThumbnail(k.pdf_url, "kampanj-preview-thumb");
 }
 
 function deleteKampanj(id) {
