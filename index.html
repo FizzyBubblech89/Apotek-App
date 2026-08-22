@@ -3878,44 +3878,60 @@ async function showLagerChecklista() {
   const now = new Date();
   lagerChecklistaAr = now.getFullYear();
   lagerChecklistaManad = now.getMonth() + 1;
-  await ensureLagerChecklistaFinns(lagerChecklistaAr, lagerChecklistaManad);
-  lagerChecklistaAllaProfiler = await fetchProfiles();
+  const [, profiler] = await Promise.all([
+    ensureLagerChecklistaFinns(lagerChecklistaAr, lagerChecklistaManad),
+    fetchProfiles(),
+  ]);
+  lagerChecklistaAllaProfiler = profiler;
   await loadLagerChecklista(lagerChecklistaAr, lagerChecklistaManad);
   renderLagerChecklistaView();
 }
 
 async function ensureLagerChecklistaFinns(ar, manad) {
-  const rows = [];
+  const veckovisaNamn = LAGER_CHECKLISTA_AKTIVITETER.filter(a => a.veckovis).map(a => a.namn);
+  const forvantatAntal = LAGER_CHECKLISTA_AKTIVITETER.reduce((sum, a) => sum + (a.veckovis ? 4 : 1), 0);
+
+  // Billig kontroll först — om allt redan stämmer (rätt antal rader,
+  // ingen kvarglömd vecka-0-rad för veckovisa aktiviteter, underlag redan
+  // ifyllt) slipper vi köra hela den tunga läknings-logiken igen. Det här
+  // är den stora hastighetsvinsten: de flesta besök behöver ingen fix alls.
+  const { data: befintliga } = await sb.from("lager_checklista").select("aktivitet, vecka, underlag").eq("ar", ar).eq("manad", manad);
+  const rows = befintliga || [];
+  const harForOrphan = rows.some(r => veckovisaNamn.includes(r.aktivitet) && r.vecka === 0);
+  const saknarUnderlag = LAGER_CHECKLISTA_AKTIVITETER.some(a => a.underlag && rows.some(r => r.aktivitet === a.namn && !r.underlag));
+  if (rows.length === forvantatAntal && !harForOrphan && !saknarUnderlag) {
+    return; // redan i perfekt skick — inget mer att göra
+  }
+
+  const nyaRader = [];
   LAGER_CHECKLISTA_AKTIVITETER.forEach(a => {
     if (a.veckovis) {
       for (let v = 1; v <= 4; v++) {
-        rows.push({ ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning, underlag: a.underlag, vecka: v });
+        nyaRader.push({ ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning, underlag: a.underlag, vecka: v });
       }
     } else {
-      rows.push({ ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning, underlag: a.underlag, vecka: 0 });
+      nyaRader.push({ ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning, underlag: a.underlag, vecka: 0 });
     }
   });
   // Självläkande: lägger bara till de rader som saknas (t.ex. nya
   // veckoposter för en aktivitet som tidigare bara fanns månadsvis).
   // Rör aldrig redan existerande rader — signeringar och tilldelningar
   // som redan gjorts denna månad påverkas inte.
-  await sb.from("lager_checklista").upsert(rows, { onConflict: "ar,manad,aktivitet,vecka", ignoreDuplicates: true });
+  await sb.from("lager_checklista").upsert(nyaRader, { onConflict: "ar,manad,aktivitet,vecka", ignoreDuplicates: true });
 
   // Städar bort ev. gamla månadsrader (vecka=0) för aktiviteter som nu är
-  // veckovisa — annars hade en överflödig femte ruta blivit kvar från innan.
-  const veckovisaNamn = LAGER_CHECKLISTA_AKTIVITETER.filter(a => a.veckovis).map(a => a.namn);
-  for (const namn of veckovisaNamn) {
-    const { error: cleanupError } = await sb.from("lager_checklista").delete().eq("ar", ar).eq("manad", manad).eq("aktivitet", namn).eq("vecka", 0);
-    if (cleanupError) console.error("Kunde inte städa bort gammal vecka-0-rad för " + namn, cleanupError);
-  }
-
-  // Fyller i beskrivning/underlag på ev. rader som redan fanns sedan innan
-  // (t.ex. månadsvisa aktiviteter, oförändrad struktur) — rör aldrig
-  // klar/signerad/tilldelad, bara referenstexten.
-  for (const a of LAGER_CHECKLISTA_AKTIVITETER) {
-    await sb.from("lager_checklista").update({ beskrivning: a.beskrivning, underlag: a.underlag })
-      .eq("ar", ar).eq("manad", manad).eq("aktivitet", a.namn);
-  }
+  // veckovisa, och fyller i beskrivning/underlag på befintliga rader —
+  // körs parallellt istället för i följd, betydligt snabbare.
+  await Promise.all([
+    ...veckovisaNamn.map(namn =>
+      sb.from("lager_checklista").delete().eq("ar", ar).eq("manad", manad).eq("aktivitet", namn).eq("vecka", 0)
+        .then(({ error }) => { if (error) console.error("Kunde inte städa bort gammal vecka-0-rad för " + namn, error); })
+    ),
+    ...LAGER_CHECKLISTA_AKTIVITETER.map(a =>
+      sb.from("lager_checklista").update({ beskrivning: a.beskrivning, underlag: a.underlag })
+        .eq("ar", ar).eq("manad", manad).eq("aktivitet", a.namn)
+    ),
+  ]);
 }
 
 async function loadLagerChecklista(ar, manad) {
