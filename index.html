@@ -4045,7 +4045,7 @@ function lagerChecklistaPosterHtml(interaktiv) {
             ${forsta.underlag ? `<div style="font-size:10.5px; color:var(--green-700); margin-top:4px;">📎 ${forsta.underlag}</div>` : ""}
             ${veckovis ? checkboxarHtml : ""}
             <div style="font-size:11px; margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">
-              <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv && isChef() ? ` <a href="#" onclick="event.preventDefault(); openLagerChecklistaTilldela('${forsta.id}', ${JSON.stringify(rader.map(r => r.id))})" style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
+              <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv && isChef() ? ` <a href="#" onclick='event.preventDefault(); openLagerChecklistaTilldela("${forsta.id}", ${JSON.stringify(rader.map(r => r.id))})' style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
               ${!veckovis && forsta.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${forsta.signerad_signum} · ${fmtSvShort(isoDate(new Date(forsta.signerad_at)))} ${fmtTime(new Date(forsta.signerad_at))}</span>` : ""}
             </div>
           </div>
