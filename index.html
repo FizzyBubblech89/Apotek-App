@@ -3966,20 +3966,26 @@ async function renderLagerChecklistaTidigareLista() {
   const contentWrap = document.getElementById("lager-checklista-content");
   const now = new Date();
   const thisAr = now.getFullYear(), thisManad = now.getMonth() + 1;
-  const { data } = await sb.from("lager_checklista").select("ar, manad").order("ar", { ascending: false }).order("manad", { ascending: false });
-  const unika = [];
-  const sedd = new Set();
+  const { data } = await sb.from("lager_checklista").select("ar, manad, klar").order("ar", { ascending: false }).order("manad", { ascending: false });
+  const grupper = {};
   (data || []).forEach(r => {
     if (r.ar === thisAr && r.manad === thisManad) return; // aktuell månad hör inte hemma i "tidigare"
     const key = `${r.ar}-${r.manad}`;
-    if (!sedd.has(key)) { sedd.add(key); unika.push({ ar: r.ar, manad: r.manad }); }
+    if (!grupper[key]) grupper[key] = { ar: r.ar, manad: r.manad, total: 0, klara: 0 };
+    grupper[key].total++;
+    if (r.klar) grupper[key].klara++;
   });
+  const unika = Object.values(grupper).sort((a, b) => b.ar - a.ar || b.manad - a.manad);
   contentWrap.innerHTML = unika.length
-    ? `<div class="kassa-row-list">${unika.map(m => `
+    ? `<div class="kassa-row-list">${unika.map(m => {
+        const klart = m.total > 0 && m.klara === m.total;
+        return `
         <div class="kassa-row" onclick="openLagerChecklistaTidigareMonad(${m.ar}, ${m.manad})">
           <div style="flex:1;">${LAGER_MANADSNAMN[m.manad]} ${m.ar}</div>
+          <span class="org-badge" style="background:${klart ? "var(--green-100)" : "#fde3c8"}; color:${klart ? "var(--green-700)" : "#b5590a"};">${klart ? "✅ Klar" : `${m.klara}/${m.total}`}</span>
         </div>
-      `).join("")}</div>`
+      `;
+      }).join("")}</div>`
     : `<div class="empty-state">Inga tidigare månader ännu.</div>`;
 }
 
@@ -3993,6 +3999,9 @@ async function openLagerChecklistaTidigareMonad(ar, manad) {
   overlay.innerHTML = `
     <div class="kassa-modal-card" style="max-width:420px;">
       <div class="kassa-modal-title">${LAGER_MANADSNAMN[manad]} ${ar}</div>
+      ${allaKlara
+        ? `<button class="btn-primary" onclick="exportLagerChecklistaPdf(${ar}, ${manad})" style="margin-bottom:14px;">📄 Exportera PDF för utskrift</button>`
+        : `<div style="font-size:11.5px; color:var(--muted); margin-bottom:14px;">Månaden är inte helt ifylld ännu — PDF-export blir tillgänglig när allt är signerat.</div>`}
       <div id="lager-checklista-manad-poster"></div>
       <button class="btn-secondary" onclick="document.getElementById('lager-checklista-manad-overlay').remove()">Stäng</button>
     </div>
@@ -4000,6 +4009,152 @@ async function openLagerChecklistaTidigareMonad(ar, manad) {
   document.body.appendChild(overlay);
   const wrap = document.getElementById("lager-checklista-manad-poster");
   wrap.innerHTML = lagerChecklistaPosterHtml(false);
+}
+
+/* ---- Inventeringsplan — vilken sektion inventeras vilken månad ---- */
+let lagerInventeringsplanCache = [];
+
+async function openInventeringsplan() {
+  const ar = lagerChecklistaAr || new Date().getFullYear();
+  const { data, error } = await sb.from("lager_inventeringsplan").select("*").eq("ar", ar);
+  lagerInventeringsplanCache = error ? [] : data;
+
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "inventeringsplan-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Inventeringsplan ${ar}</div>
+      <div class="field-group">
+        <label class="field-label">Sektion</label>
+        <input class="field-input" id="inventeringsplan-sektion-input" type="text" placeholder="T.ex. Hudvård, Vitaminer, Hjälpmedel...">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Månad</label>
+        <select class="field-input" id="inventeringsplan-manad-select">
+          ${LAGER_MANADSNAMN.slice(1).map((namn, i) => `<option value="${i + 1}">${namn}</option>`).join("")}
+        </select>
+      </div>
+      <div id="inventeringsplan-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:8px 0;"></div>
+      <button class="btn-primary" onclick="submitInventeringsplanPost()">Lägg till i planen</button>
+
+      <div class="kassa-section-title" style="margin-top:20px;">Årets plan</div>
+      <div id="inventeringsplan-list"></div>
+      <button class="btn-secondary" onclick="document.getElementById('inventeringsplan-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  renderInventeringsplanList();
+}
+
+function renderInventeringsplanList() {
+  const wrap = document.getElementById("inventeringsplan-list");
+  if (!wrap) return;
+  const sorterad = [...lagerInventeringsplanCache].sort((a, b) => a.manad - b.manad);
+  wrap.innerHTML = sorterad.length
+    ? `<div class="kassa-row-list">${sorterad.map(p => `
+        <div class="kassa-row" style="cursor:default;">
+          <div style="width:80px; flex-shrink:0; font-weight:700; color:var(--green-700); font-size:12px;">${LAGER_MANADSNAMN[p.manad]}</div>
+          <div style="flex:1; min-width:0;">${p.sektion}</div>
+          <button class="kr-delete" onclick="deleteInventeringsplanPost('${p.id}')" aria-label="Ta bort">✕</button>
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">Ingen plan tillagd ännu.</div>`;
+}
+
+async function submitInventeringsplanPost() {
+  const sektion = document.getElementById("inventeringsplan-sektion-input").value.trim();
+  const manad = parseInt(document.getElementById("inventeringsplan-manad-select").value);
+  const errorBox = document.getElementById("inventeringsplan-error");
+  if (!sektion) { errorBox.textContent = "Skriv en sektion."; return; }
+  const ar = lagerChecklistaAr || new Date().getFullYear();
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("lager_inventeringsplan").insert({ ar, manad, sektion, created_by: user.id });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  document.getElementById("inventeringsplan-sektion-input").value = "";
+  errorBox.textContent = "";
+  const { data } = await sb.from("lager_inventeringsplan").select("*").eq("ar", ar);
+  lagerInventeringsplanCache = data || [];
+  renderInventeringsplanList();
+}
+
+async function deleteInventeringsplanPost(id) {
+  const { error } = await sb.from("lager_inventeringsplan").delete().eq("id", id);
+  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+  lagerInventeringsplanCache = lagerInventeringsplanCache.filter(p => p.id !== id);
+  renderInventeringsplanList();
+}
+
+function exportLagerChecklistaPdf(ar, manad) {
+  if (!window.jspdf) { alert("PDF-biblioteket kunde inte laddas."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 18;
+
+  doc.setFontSize(15);
+  doc.text("Checklista - Varuansvarig aktiviteter per månad", 14, y); y += 7;
+  doc.setFontSize(10);
+  doc.setTextColor(120);
+  doc.text(`${LAGER_MANADSNAMN[manad]} ${ar} · Referensdokument I401, I404, I405, I408, I412, C403, C406`, 14, y); y += 10;
+  doc.setTextColor(0);
+
+  // Gruppera per aktivitet, samma sätt som i appens vy
+  const seddaAktiviteter = new Set();
+  const grupper = [];
+  lagerChecklistaCache.forEach(p => {
+    if (seddaAktiviteter.has(p.aktivitet)) return;
+    seddaAktiviteter.add(p.aktivitet);
+    grupper.push(lagerChecklistaCache.filter(x => x.aktivitet === p.aktivitet));
+  });
+
+  grupper.forEach(rader => {
+    const forsta = rader[0];
+    const tilldelad = lagerChecklistaAllaProfiler.find(u => u.id === forsta.tilldelad_till);
+    const veckovis = rader.length > 1;
+
+    if (y > 265) { doc.addPage(); y = 20; }
+
+    doc.setFontSize(11);
+    doc.setFont(undefined, "bold");
+    doc.text(forsta.aktivitet, 14, y); y += 5.5;
+
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(9);
+    const beskrivningRader = doc.splitTextToSize(forsta.beskrivning || "", pageWidth - 28);
+    doc.text(beskrivningRader, 14, y); y += beskrivningRader.length * 4.2 + 2;
+
+    if (forsta.underlag) {
+      doc.setTextColor(20, 107, 69);
+      const underlagRader = doc.splitTextToSize("Underlag: " + forsta.underlag, pageWidth - 28);
+      doc.text(underlagRader, 14, y); y += underlagRader.length * 4.2 + 2;
+      doc.setTextColor(0);
+    }
+
+    doc.setFontSize(9);
+    doc.text(`Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}`, 14, y); y += 4.5;
+
+    if (veckovis) {
+      rader.forEach(r => {
+        const rad = `V${r.vecka}: ${r.klar ? `Signerad — ${r.signerad_signum}, ${fmtSvShort(isoDate(new Date(r.signerad_at)))} ${fmtTime(new Date(r.signerad_at))}` : "Ej signerad"}`;
+        doc.text(rad, 18, y); y += 4.5;
+      });
+    } else {
+      const rad = forsta.klar
+        ? `Signerad — ${forsta.signerad_signum}, ${fmtSvShort(isoDate(new Date(forsta.signerad_at)))} ${fmtTime(new Date(forsta.signerad_at))}`
+        : "Ej signerad";
+      doc.text(rad, 18, y); y += 4.5;
+    }
+    y += 4;
+  });
+
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  doc.text(`Exporterad ${fmtSvFull(isoDate(new Date()))}`, 14, 290);
+
+  doc.save(`varuansvarig-checklista-${ar}-${String(manad).padStart(2, "0")}.pdf`);
 }
 
 function lagerChecklistaPosterHtml(interaktiv) {
@@ -4040,7 +4195,7 @@ function lagerChecklistaPosterHtml(interaktiv) {
         <div style="display:flex; align-items:flex-start; gap:8px;">
           ${veckovis ? "" : checkboxarHtml}
           <div style="flex:1; min-width:0;">
-            <div style="font-weight:700; font-size:13px;">${forsta.aktivitet}${veckovis ? ` <span style="font-weight:400; color:var(--muted); font-size:11px;">(signeras varje vecka)</span>` : ""}</div>
+            <div style="font-weight:700; font-size:13px;">${interaktiv && forsta.aktivitet === "Inventering" ? `<a href="#" onclick="event.preventDefault(); openInventeringsplan()" style="color:var(--green-700); text-decoration:underline;">${forsta.aktivitet} 📋</a>` : forsta.aktivitet}${veckovis ? ` <span style="font-weight:400; color:var(--muted); font-size:11px;">(signeras varje vecka)</span>` : ""}</div>
             <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${forsta.beskrivning}</div>
             ${forsta.underlag ? `<div style="font-size:10.5px; color:var(--green-700); margin-top:4px;">📎 ${forsta.underlag}</div>` : ""}
             ${veckovis ? checkboxarHtml : ""}
