@@ -3563,6 +3563,14 @@ function renderLagerHub() {
         <div class="nav-label">Lageravvikelser</div>
         <div class="nav-sub">Rapportera & hantera</div>
       </div>
+
+      <div class="nav-card" onclick="showLagerChecklista()">
+        <div class="nav-icon nav-icon-c3">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 11L11 13L15 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="4" width="16" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 4V2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 4V2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">Varuansvarig</div>
+        <div class="nav-sub">Månadens checklista</div>
+      </div>
     </div>
   `;
 }
@@ -3581,6 +3589,7 @@ async function loadLageravvikelser() {
 
 function setLagerTab(tab) {
   lagerTab = tab;
+  lagerVisibleCount = LAGER_PAGE_SIZE;
   renderLagerView();
 }
 
@@ -3590,37 +3599,85 @@ function lagerPersonLineHtml(signum, iso) {
   return `${signum} · ${fmtSvShort(isoDate(d))} ${fmtTime(d)}`;
 }
 
+let lagerSearchQuery = "";
+let lagerVisibleCount = 20;
+const LAGER_PAGE_SIZE = 20;
+
+function setLagerSearch(value) {
+  lagerSearchQuery = value;
+  lagerVisibleCount = LAGER_PAGE_SIZE;
+  renderLagerList();
+}
+
+function lagerLoadMore() {
+  lagerVisibleCount += LAGER_PAGE_SIZE;
+  renderLagerList();
+}
+
+function lagerMatchesSearch(a, query) {
+  const q = normalizeSearch(query);
+  if (!q) return true;
+  const words = q.split(" ").filter(Boolean);
+  const haystack = normalizeSearch(`${a.vnr} ${a.fritext || ""}`);
+  return words.every(w => haystack.includes(w));
+}
+
 function renderLagerView() {
   const container = document.getElementById("lager-results");
-  const list = lagerCache.filter(a => lagerTab === "avslutade" ? a.hanterad : !a.hanterad);
-
   container.innerHTML = `
     <button class="btn-primary" onclick="openNewLagerModal()">Rapportera lageravvikelse</button>
 
-    <div class="view-toggle" style="margin-top:16px;">
+    <div class="field-group" style="margin-top:16px;">
+      <input class="field-input" type="text" placeholder="🔍 Sök på VNR eller text..." value="${lagerSearchQuery}" oninput="setLagerSearch(this.value)">
+    </div>
+
+    <div class="view-toggle">
       <button id="lager-tab-pagaende" onclick="setLagerTab('pagaende')">Pågående</button>
       <button id="lager-tab-avslutade" onclick="setLagerTab('avslutade')">Avslutade avvikelser</button>
     </div>
     <div id="lager-list"></div>
+    <div id="lager-load-more"></div>
   `;
   document.getElementById(`lager-tab-${lagerTab}`).classList.add("active");
+  renderLagerList();
+}
 
+function renderLagerList() {
   const listWrap = document.getElementById("lager-list");
-  listWrap.innerHTML = list.length
-    ? `<div class="kassa-row-list">${list.map(a => `
-        <div class="kassa-row" style="align-items:flex-start;">
-          <input type="checkbox" ${a.hanterad ? "checked" : ""} onchange="toggleLagerHanterad('${a.id}', this.checked)" style="margin-top:2px;">
-          <div style="flex:1; min-width:0; margin-left:8px;">
-            <div style="font-weight:700;">VNR ${a.vnr} <span style="color:${a.antal < 0 ? "#b3261e" : "var(--green-700)"};">${a.antal > 0 ? "+" : ""}${a.antal} st</span></div>
-            ${a.fritext ? `<div style="font-size:12px; color:var(--muted); margin-top:2px;">${a.fritext}</div>` : ""}
-            <div style="font-size:11px; color:var(--muted); margin-top:2px;">Rapporterad: ${lagerPersonLineHtml(a.signum, a.created_at)}</div>
-            ${a.hanterad ? `<div style="font-size:11px; color:var(--green-700); margin-top:1px;">Avslutad: ${lagerPersonLineHtml(a.hanterad_signum, a.hanterad_datum)}</div>` : ""}
+  const loadMoreWrap = document.getElementById("lager-load-more");
+  if (!listWrap) return;
+
+  const filtered = lagerCache
+    .filter(a => lagerTab === "avslutade" ? a.hanterad : !a.hanterad)
+    .filter(a => lagerMatchesSearch(a, lagerSearchQuery));
+  const visible = filtered.slice(0, lagerVisibleCount);
+
+  listWrap.innerHTML = visible.length
+    ? `<div class="kassa-row-list">${visible.map(a => `
+        <div class="kassa-row" style="align-items:center; padding:8px 12px;">
+          <input type="checkbox" ${a.hanterad ? "checked" : ""} onchange="toggleLagerHanterad('${a.id}', this.checked)">
+          <div style="flex:1; min-width:0; margin-left:8px; overflow:hidden;">
+            <div style="font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              <strong>${a.vnr}</strong>
+              <span style="color:${a.antal < 0 ? "#b3261e" : "var(--green-700)"}; font-weight:700;">${a.antal > 0 ? "+" : ""}${a.antal}</span>
+              ${a.fritext ? `<span style="color:var(--muted);"> · ${a.fritext}</span>` : ""}
+            </div>
+            <div style="font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              ${lagerPersonLineHtml(a.signum, a.created_at)}${a.hanterad ? ` → ${lagerPersonLineHtml(a.hanterad_signum, a.hanterad_datum)}` : ""}
+            </div>
           </div>
-          <button class="kr-edit" onclick="openEditLagerModal('${a.id}')" aria-label="Redigera">✎</button>
-          ${isChef() ? `<button class="kr-delete" onclick="deleteLageravvikelse('${a.id}')" aria-label="Ta bort">✕</button>` : ""}
+          <button class="kr-edit" onclick="openEditLagerModal('${a.id}')" aria-label="Redigera" style="flex-shrink:0;">✎</button>
+          ${isChef() ? `<button class="kr-delete" onclick="deleteLageravvikelse('${a.id}')" aria-label="Ta bort" style="flex-shrink:0;">✕</button>` : ""}
         </div>
       `).join("")}</div>`
-    : `<div class="empty-state">${lagerTab === "avslutade" ? "Inga avslutade avvikelser ännu." : "Inga pågående avvikelser."}</div>`;
+    : `<div class="empty-state">${lagerSearchQuery ? "Inga träffar." : (lagerTab === "avslutade" ? "Inga avslutade avvikelser ännu." : "Inga pågående avvikelser.")}</div>`;
+
+  if (loadMoreWrap) {
+    const remaining = filtered.length - visible.length;
+    loadMoreWrap.innerHTML = remaining > 0
+      ? `<button class="btn-secondary" onclick="lagerLoadMore()">Ladda fler (${remaining} kvar)</button>`
+      : "";
+  }
 }
 
 function openNewLagerModal() {
@@ -3687,7 +3744,7 @@ async function submitLageravvikelse() {
   const overlay = document.getElementById("lager-new-overlay");
   if (overlay) overlay.remove();
   await loadLageravvikelser();
-  renderLagerView();
+  renderLagerList();
 }
 
 async function toggleLagerHanterad(id, checked) {
@@ -3698,7 +3755,7 @@ async function toggleLagerHanterad(id, checked) {
   const { error } = await sb.from("lageravvikelser").update(patch).eq("id", id);
   if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
   await loadLageravvikelser();
-  renderLagerView();
+  renderLagerList();
 }
 
 /* ---- Redigera befintlig lageravvikelse — går att justera både
@@ -3766,7 +3823,7 @@ async function saveLagerEdit(id) {
   const overlay = document.getElementById("lager-edit-overlay");
   if (overlay) overlay.remove();
   await loadLageravvikelser();
-  renderLagerView();
+  renderLagerList();
 }
 
 function deleteLageravvikelse(id) {
@@ -3778,9 +3835,215 @@ function deleteLageravvikelse(id) {
       const { error } = await sb.from("lageravvikelser").delete().eq("id", id);
       if (error) { alert("Kunde inte ta bort: " + error.message); return; }
       await loadLageravvikelser();
-      renderLagerView();
+      renderLagerList();
     }
   );
+}
+
+/* ---- Varuansvarig — månatlig checklista (referensdokument I401/
+   I404/I405/I408/I412/C403/C406). Skapas automatiskt per månad
+   (lazy — vid första öppning), poster kan tilldelas en person och
+   signeras av den som utför dem. ---- */
+const LAGER_CHECKLISTA_AKTIVITETER = [
+  { namn: "Lagervärde och omsättningshastighet", beskrivning: "Jämför månadens värde med föregående månad och målvärde. Vid stor avvikelse mot målvärde, stäm av med apotekschef." },
+  { namn: "Servicegrad", beskrivning: "Jämför månadens värde med föregående månad och målvärde. Vid behov, fokusera extra på aktiviteten Efterfrågan." },
+  { namn: "Efterfrågan", beskrivning: "Följ upp registrerad efterfrågan varje månad via efterfråganknappen och rapporten för efterfrågan i Cognos." },
+  { namn: "Negativt lagersaldo per vara", beskrivning: "Gå igenom rapporten och korrigera lagersaldo med korrekt orsakskod. Ska vara tömd vid månadsskifte. Utförs varje vecka." },
+  { namn: "Lagersaldo utgångna varor", beskrivning: "Rx och OTC krediteras av leverantör oavsett värde. Korrigeras med kreditering, kasseras och rapporteras till distributör." },
+  { namn: "Kontrollera ej avslutade order och aktiva order", beskrivning: "Öppna orderrader ska överensstämma med restnoterade och ej levererade varor. Alla orderrader äldre än en månad ska kontrolleras." },
+  { namn: "Inventering av kontrollvaror", beskrivning: "Utför månadsvis inventering av kontrollvaror (lätt och tung narkotika). Använd handdatorn." },
+  { namn: "Hyllvärmare", beskrivning: "Gå igenom och bedöm om en vara ska lagerhållas eller inte. Gås igenom en gång per månad. Släng aldrig kuranta varor." },
+  { namn: "Lagerkorrigeringar", beskrivning: "Följ upp och åtgärda avvikelser. Genomförs den 25:e i månaden. Rapporten attesteras av AC sista dagen." },
+  { namn: "Hållbarhet", beskrivning: "Ta ut hållbarhetsrapporten och säkerställ att varor med kort hållbarhet plockas bort från lagret. Använd handdatorn." },
+  { namn: "Rapportering till Distributör", beskrivning: "Rapportera varor för kreditering på respektive distributörs hemsida." },
+  { namn: "Kreditering från Distributör", beskrivning: "Säkerställ att krediteringar på respektive distributörs hemsida är godkända." },
+  { namn: "Inventering", beskrivning: "Genomförs löpande varje vecka. Attesteras av AC med namn och datum, arkiveras enligt gällande rutin." },
+];
+const LAGER_MANADSNAMN = ["", "Januari", "Februari", "Mars", "April", "Maj", "Juni", "Juli", "Augusti", "September", "Oktober", "November", "December"];
+
+let lagerChecklistaCache = [];
+let lagerChecklistaAr = null;
+let lagerChecklistaManad = null;
+let lagerChecklistaView = "aktuell"; // "aktuell" | "tidigare"
+let lagerChecklistaAllaProfiler = [];
+
+async function showLagerChecklista() {
+  lagerSection = "checklista";
+  lagerChecklistaView = "aktuell";
+  const now = new Date();
+  lagerChecklistaAr = now.getFullYear();
+  lagerChecklistaManad = now.getMonth() + 1;
+  await ensureLagerChecklistaFinns(lagerChecklistaAr, lagerChecklistaManad);
+  lagerChecklistaAllaProfiler = await fetchProfiles();
+  await loadLagerChecklista(lagerChecklistaAr, lagerChecklistaManad);
+  renderLagerChecklistaView();
+}
+
+async function ensureLagerChecklistaFinns(ar, manad) {
+  const { data } = await sb.from("lager_checklista").select("id").eq("ar", ar).eq("manad", manad);
+  if (data && data.length) return; // finns redan skapad denna månad
+  const rows = LAGER_CHECKLISTA_AKTIVITETER.map(a => ({
+    ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning,
+  }));
+  await sb.from("lager_checklista").insert(rows);
+}
+
+async function loadLagerChecklista(ar, manad) {
+  const { data, error } = await sb.from("lager_checklista").select("*").eq("ar", ar).eq("manad", manad);
+  lagerChecklistaCache = error ? [] : data;
+  // Sortera i samma ordning som referenslistan
+  lagerChecklistaCache.sort((a, b) =>
+    LAGER_CHECKLISTA_AKTIVITETER.findIndex(x => x.namn === a.aktivitet) -
+    LAGER_CHECKLISTA_AKTIVITETER.findIndex(x => x.namn === b.aktivitet)
+  );
+}
+
+function renderLagerChecklistaView() {
+  const container = document.getElementById("lager-results");
+  const allaKlara = lagerChecklistaCache.length > 0 && lagerChecklistaCache.every(p => p.klar);
+
+  container.innerHTML = `
+    <div class="view-toggle">
+      <button id="lager-checklista-tab-aktuell" onclick="setLagerChecklistaView('aktuell')">Aktuell månad</button>
+      <button id="lager-checklista-tab-tidigare" onclick="setLagerChecklistaView('tidigare')">Tidigare månader</button>
+    </div>
+    <div id="lager-checklista-content"></div>
+  `;
+  document.getElementById(`lager-checklista-tab-${lagerChecklistaView}`).classList.add("active");
+
+  if (lagerChecklistaView === "tidigare") {
+    renderLagerChecklistaTidigareLista();
+  } else {
+    renderLagerChecklistaPoster(allaKlara);
+  }
+}
+
+function setLagerChecklistaView(view) {
+  lagerChecklistaView = view;
+  if (view === "aktuell") {
+    const now = new Date();
+    lagerChecklistaAr = now.getFullYear();
+    lagerChecklistaManad = now.getMonth() + 1;
+    loadLagerChecklista(lagerChecklistaAr, lagerChecklistaManad).then(renderLagerChecklistaView);
+    return;
+  }
+  renderLagerChecklistaView();
+}
+
+async function renderLagerChecklistaTidigareLista() {
+  const contentWrap = document.getElementById("lager-checklista-content");
+  const now = new Date();
+  const thisAr = now.getFullYear(), thisManad = now.getMonth() + 1;
+  const { data } = await sb.from("lager_checklista").select("ar, manad").order("ar", { ascending: false }).order("manad", { ascending: false });
+  const unika = [];
+  const sedd = new Set();
+  (data || []).forEach(r => {
+    if (r.ar === thisAr && r.manad === thisManad) return; // aktuell månad hör inte hemma i "tidigare"
+    const key = `${r.ar}-${r.manad}`;
+    if (!sedd.has(key)) { sedd.add(key); unika.push({ ar: r.ar, manad: r.manad }); }
+  });
+  contentWrap.innerHTML = unika.length
+    ? `<div class="kassa-row-list">${unika.map(m => `
+        <div class="kassa-row" onclick="openLagerChecklistaTidigareMonad(${m.ar}, ${m.manad})">
+          <div style="flex:1;">${LAGER_MANADSNAMN[m.manad]} ${m.ar}</div>
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">Inga tidigare månader ännu.</div>`;
+}
+
+async function openLagerChecklistaTidigareMonad(ar, manad) {
+  await loadLagerChecklista(ar, manad);
+  const allaKlara = lagerChecklistaCache.length > 0 && lagerChecklistaCache.every(p => p.klar);
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "lager-checklista-manad-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card" style="max-width:420px;">
+      <div class="kassa-modal-title">${LAGER_MANADSNAMN[manad]} ${ar}</div>
+      <div id="lager-checklista-manad-poster"></div>
+      <button class="btn-secondary" onclick="document.getElementById('lager-checklista-manad-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const wrap = document.getElementById("lager-checklista-manad-poster");
+  wrap.innerHTML = lagerChecklistaPosterHtml(false);
+}
+
+function lagerChecklistaPosterHtml(interaktiv) {
+  return lagerChecklistaCache.map(p => {
+    const tilldelad = lagerChecklistaAllaProfiler.find(u => u.id === p.tilldelad_till);
+    return `
+      <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; ${p.klar ? "background:var(--green-050);" : ""}">
+        <div style="display:flex; align-items:flex-start; gap:8px;">
+          ${interaktiv ? `<input type="checkbox" ${p.klar ? "checked" : ""} onchange="toggleLagerChecklistaKlar('${p.id}', this.checked)" style="margin-top:2px;">` : `<span style="margin-top:1px;">${p.klar ? "✅" : "⬜"}</span>`}
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700; font-size:13px;">${p.aktivitet}</div>
+            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${p.beskrivning}</div>
+            <div style="font-size:11px; margin-top:4px; display:flex; flex-wrap:wrap; gap:8px;">
+              <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv && isChef() ? ` <a href="#" onclick="event.preventDefault(); openLagerChecklistaTilldela('${p.id}')" style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
+              ${p.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderLagerChecklistaPoster(allaKlara) {
+  const contentWrap = document.getElementById("lager-checklista-content");
+  contentWrap.innerHTML = `
+    <div style="background:${allaKlara ? "var(--green-100)" : "#fff8f0"}; border:1px solid ${allaKlara ? "var(--green-300)" : "#f3d9b9"}; border-radius:14px; padding:12px 14px; margin:14px 0; text-align:center; font-weight:700; color:${allaKlara ? "var(--green-700)" : "#b5590a"};">
+      ${allaKlara ? "✅ Allt ifyllt för " + LAGER_MANADSNAMN[lagerChecklistaManad] : "⏳ " + lagerChecklistaCache.filter(p => p.klar).length + " av " + lagerChecklistaCache.length + " klara"}
+    </div>
+    <div id="lager-checklista-poster-list"></div>
+  `;
+  document.getElementById("lager-checklista-poster-list").innerHTML = lagerChecklistaPosterHtml(true);
+}
+
+async function toggleLagerChecklistaKlar(id, checked) {
+  const user = getCurrentUser();
+  const patch = checked
+    ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
+    : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null };
+  const { error } = await sb.from("lager_checklista").update(patch).eq("id", id);
+  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
+  await loadLagerChecklista(lagerChecklistaAr, lagerChecklistaManad);
+  const allaKlara = lagerChecklistaCache.length > 0 && lagerChecklistaCache.every(p => p.klar);
+  renderLagerChecklistaPoster(allaKlara);
+}
+
+function openLagerChecklistaTilldela(id) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "lager-tilldela-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Tilldela aktivitet</div>
+      <div class="field-group">
+        <select class="field-input" id="lager-tilldela-select">
+          <option value="">Ingen</option>
+          ${lagerChecklistaAllaProfiler.map(u => `<option value="${u.id}">${u.name}</option>`).join("")}
+        </select>
+      </div>
+      <button class="btn-primary" onclick="saveLagerChecklistaTilldelning('${id}')">Spara</button>
+      <button class="btn-secondary" onclick="document.getElementById('lager-tilldela-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function saveLagerChecklistaTilldelning(id) {
+  const val = document.getElementById("lager-tilldela-select").value || null;
+  const { error } = await sb.from("lager_checklista").update({ tilldelad_till: val }).eq("id", id);
+  if (error) { alert("Kunde inte spara: " + error.message); return; }
+  const overlay = document.getElementById("lager-tilldela-overlay");
+  if (overlay) overlay.remove();
+  await loadLagerChecklista(lagerChecklistaAr, lagerChecklistaManad);
+  const allaKlara = lagerChecklistaCache.length > 0 && lagerChecklistaCache.every(p => p.klar);
+  renderLagerChecklistaPoster(allaKlara);
 }
 
 async function showKampanj() {
