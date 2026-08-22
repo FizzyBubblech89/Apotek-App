@@ -3845,19 +3845,19 @@ function deleteLageravvikelse(id) {
    (lazy — vid första öppning), poster kan tilldelas en person och
    signeras av den som utför dem. ---- */
 const LAGER_CHECKLISTA_AKTIVITETER = [
-  { namn: "Lagervärde och omsättningshastighet", beskrivning: "Jämför månadens värde med föregående månad och målvärde. Vid stor avvikelse mot målvärde, stäm av med apotekschef." },
-  { namn: "Servicegrad", beskrivning: "Jämför månadens värde med föregående månad och målvärde. Vid behov, fokusera extra på aktiviteten Efterfrågan." },
-  { namn: "Efterfrågan", beskrivning: "Följ upp registrerad efterfrågan varje månad via efterfråganknappen och rapporten för efterfrågan i Cognos." },
-  { namn: "Negativt lagersaldo per vara", beskrivning: "Gå igenom rapporten och korrigera lagersaldo med korrekt orsakskod. Ska vara tömd vid månadsskifte. Utförs varje vecka." },
-  { namn: "Lagersaldo utgångna varor", beskrivning: "Rx och OTC krediteras av leverantör oavsett värde. Korrigeras med kreditering, kasseras och rapporteras till distributör." },
-  { namn: "Kontrollera ej avslutade order och aktiva order", beskrivning: "Öppna orderrader ska överensstämma med restnoterade och ej levererade varor. Alla orderrader äldre än en månad ska kontrolleras." },
-  { namn: "Inventering av kontrollvaror", beskrivning: "Utför månadsvis inventering av kontrollvaror (lätt och tung narkotika). Använd handdatorn." },
-  { namn: "Hyllvärmare", beskrivning: "Gå igenom och bedöm om en vara ska lagerhållas eller inte. Gås igenom en gång per månad. Släng aldrig kuranta varor." },
-  { namn: "Lagerkorrigeringar", beskrivning: "Följ upp och åtgärda avvikelser. Genomförs den 25:e i månaden. Rapporten attesteras av AC sista dagen." },
-  { namn: "Hållbarhet", beskrivning: "Ta ut hållbarhetsrapporten och säkerställ att varor med kort hållbarhet plockas bort från lagret. Använd handdatorn." },
-  { namn: "Rapportering till Distributör", beskrivning: "Rapportera varor för kreditering på respektive distributörs hemsida." },
-  { namn: "Kreditering från Distributör", beskrivning: "Säkerställ att krediteringar på respektive distributörs hemsida är godkända." },
-  { namn: "Inventering", beskrivning: "Genomförs löpande varje vecka. Attesteras av AC med namn och datum, arkiveras enligt gällande rutin." },
+  { namn: "Lagervärde och omsättningshastighet", beskrivning: "Jämför månadens värde med föregående månad och målvärde. Vid stor avvikelse mot målvärde, stäm av med apotekschef.", underlag: "Cognos: Lagertermometer, erhålles från RVA", veckovis: false },
+  { namn: "Servicegrad", beskrivning: "Jämför månadens värde med föregående månad och målvärde. Vid behov, fokusera extra på aktiviteten Efterfrågan.", underlag: "Cognos: Lagertermometer, erhålles från RVA", veckovis: false },
+  { namn: "Efterfrågan", beskrivning: "Följ upp registrerad efterfrågan varje månad via efterfråganknappen och rapporten för efterfrågan i Cognos.", underlag: "Cognos: Rapport för efterfrågan, erhålles från RVA", veckovis: false },
+  { namn: "Negativt lagersaldo per vara", beskrivning: "Gå igenom rapporten och korrigera lagersaldo med korrekt orsakskod. Ska vara tömd vid månadsskifte. Utförs varje vecka.", underlag: "Rapport 1012: Negativt lagersaldo per vara · Användarstöd - Hantering av varor med negativt saldo · Instruktion - Korrigering av lager", veckovis: true },
+  { namn: "Lagersaldo utgångna varor", beskrivning: "Rx och OTC krediteras av leverantör oavsett värde. Korrigeras med kreditering, kasseras och rapporteras till distributör.", underlag: "Rapport 1014: Lagersaldo utgångna varor · Blankett: Lagervårdslista egenvårdsvaror · Blankett: Lagervårdslista receptvaror", veckovis: true },
+  { namn: "Kontrollera ej avslutade order och aktiva order", beskrivning: "Öppna orderrader ska överensstämma med restnoterade och ej levererade varor. Alla orderrader äldre än en månad ska kontrolleras.", underlag: "Instruktion - Rensning av restnoterade artiklar", veckovis: false },
+  { namn: "Inventering av kontrollvaror", beskrivning: "Utför månadsvis inventering av kontrollvaror (lätt och tung narkotika). Använd handdatorn.", underlag: "Rapport 1033: Varuinventering: Detaljer per vara efter utförd inventering · Instruktion - Inventering av narkotika och odenaturerad teknisk sprit", veckovis: false },
+  { namn: "Hyllvärmare", beskrivning: "Gå igenom och bedöm om en vara ska lagerhållas eller inte. Gås igenom en gång per månad. Släng aldrig kuranta varor.", underlag: "Rapport 1042 Lager: Hyllvärmare · Rapport RELEX: Tilläggssortiment månadsrapport · Rapport RELEX: Hyllvärmare RX - varor utanför utbytesgrupp · Användarstöd - Hyllvärmare", veckovis: false },
+  { namn: "Lagerkorrigeringar", beskrivning: "Följ upp och åtgärda avvikelser. Genomförs den 25:e i månaden. Rapporten attesteras av AC sista dagen.", underlag: "Rapport 1020: Lagerkorrigering per orsakskod · Instruktion - Korrigering av lager", veckovis: false },
+  { namn: "Hållbarhet", beskrivning: "Ta ut hållbarhetsrapporten och säkerställ att varor med kort hållbarhet plockas bort från lagret. Använd handdatorn.", underlag: "Rapport 1004: Apoteket: Hållbarhetsrapport · Instruktion - Hållbarhetskontroll · Användarstöd - Hållbarhetskontroll med handdator - Zebra TC21", veckovis: false },
+  { namn: "Rapportering till Distributör", beskrivning: "Rapportera varor för kreditering på respektive distributörs hemsida.", underlag: "Instruktion - Hållbarhetskontroll", veckovis: false },
+  { namn: "Kreditering från Distributör", beskrivning: "Säkerställ att krediteringar på respektive distributörs hemsida är godkända.", underlag: "", veckovis: false },
+  { namn: "Inventering", beskrivning: "Genomförs löpande varje vecka. Attesteras av AC med namn och datum, arkiveras enligt gällande rutin.", underlag: "Rapport 1033: Varuinventering: Detaljer per vara efter utförd inventering · Instruktion - Inventering av lager · Användarstöd - Inventering med handdator · Användarstöd - Hantera varor med saldo 0 vid inventering · Användarstöd - Hantering av rapporten 1033 Detaljer per vara", veckovis: true },
 ];
 const LAGER_MANADSNAMN = ["", "Januari", "Februari", "Mars", "April", "Maj", "Juni", "Juli", "Augusti", "September", "Oktober", "November", "December"];
 
@@ -3882,9 +3882,16 @@ async function showLagerChecklista() {
 async function ensureLagerChecklistaFinns(ar, manad) {
   const { data } = await sb.from("lager_checklista").select("id").eq("ar", ar).eq("manad", manad);
   if (data && data.length) return; // finns redan skapad denna månad
-  const rows = LAGER_CHECKLISTA_AKTIVITETER.map(a => ({
-    ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning,
-  }));
+  const rows = [];
+  LAGER_CHECKLISTA_AKTIVITETER.forEach(a => {
+    if (a.veckovis) {
+      for (let v = 1; v <= 4; v++) {
+        rows.push({ ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning, underlag: a.underlag, vecka: v });
+      }
+    } else {
+      rows.push({ ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning, underlag: a.underlag, vecka: 0 });
+    }
+  });
   await sb.from("lager_checklista").insert(rows);
 }
 
@@ -3892,10 +3899,12 @@ async function loadLagerChecklista(ar, manad) {
   const { data, error } = await sb.from("lager_checklista").select("*").eq("ar", ar).eq("manad", manad);
   lagerChecklistaCache = error ? [] : data;
   // Sortera i samma ordning som referenslistan
-  lagerChecklistaCache.sort((a, b) =>
-    LAGER_CHECKLISTA_AKTIVITETER.findIndex(x => x.namn === a.aktivitet) -
-    LAGER_CHECKLISTA_AKTIVITETER.findIndex(x => x.namn === b.aktivitet)
-  );
+  lagerChecklistaCache.sort((a, b) => {
+    const orderDiff = LAGER_CHECKLISTA_AKTIVITETER.findIndex(x => x.namn === a.aktivitet) -
+      LAGER_CHECKLISTA_AKTIVITETER.findIndex(x => x.namn === b.aktivitet);
+    if (orderDiff !== 0) return orderDiff;
+    return a.vecka - b.vecka;
+  });
 }
 
 function renderLagerChecklistaView() {
@@ -3971,18 +3980,50 @@ async function openLagerChecklistaTidigareMonad(ar, manad) {
 }
 
 function lagerChecklistaPosterHtml(interaktiv) {
-  return lagerChecklistaCache.map(p => {
-    const tilldelad = lagerChecklistaAllaProfiler.find(u => u.id === p.tilldelad_till);
+  // Gruppera raderna per aktivitetsnamn — veckovisa aktiviteter har
+  // fyra rader (vecka 1-4) som ska visas tillsammans under samma kort.
+  const grupper = [];
+  const seddaAktiviteter = new Set();
+  lagerChecklistaCache.forEach(p => {
+    if (seddaAktiviteter.has(p.aktivitet)) return;
+    seddaAktiviteter.add(p.aktivitet);
+    grupper.push(lagerChecklistaCache.filter(x => x.aktivitet === p.aktivitet));
+  });
+
+  return grupper.map(rader => {
+    const forsta = rader[0];
+    const veckovis = rader.length > 1;
+    const tilldelad = lagerChecklistaAllaProfiler.find(u => u.id === forsta.tilldelad_till);
+    const alltKlartForAktivitet = rader.every(r => r.klar);
+
+    const checkboxarHtml = veckovis
+      ? `<div style="display:flex; gap:6px; margin-top:6px;">
+          ${rader.map(r => `
+            <label style="display:flex; flex-direction:column; align-items:center; gap:2px; font-size:10px; color:var(--muted); cursor:pointer;">
+              <span>v${r.vecka}</span>
+              ${interaktiv
+                ? `<input type="checkbox" ${r.klar ? "checked" : ""} onchange="toggleLagerChecklistaKlar('${r.id}', this.checked)">`
+                : `<span>${r.klar ? "✅" : "⬜"}</span>`}
+            </label>
+          `).join("")}
+        </div>
+        ${rader.filter(r => r.klar).map(r => `<div style="font-size:10px; color:var(--green-700); margin-top:2px;">v${r.vecka} signerad: ${r.signerad_signum} · ${fmtSvShort(isoDate(new Date(r.signerad_at)))} ${fmtTime(new Date(r.signerad_at))}</div>`).join("")}`
+      : `${interaktiv
+          ? `<input type="checkbox" ${forsta.klar ? "checked" : ""} onchange="toggleLagerChecklistaKlar('${forsta.id}', this.checked)" style="margin-top:2px;">`
+          : `<span style="margin-top:1px;">${forsta.klar ? "✅" : "⬜"}</span>`}`;
+
     return `
-      <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; ${p.klar ? "background:var(--green-050);" : ""}">
+      <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; ${alltKlartForAktivitet ? "background:var(--green-050);" : ""}">
         <div style="display:flex; align-items:flex-start; gap:8px;">
-          ${interaktiv ? `<input type="checkbox" ${p.klar ? "checked" : ""} onchange="toggleLagerChecklistaKlar('${p.id}', this.checked)" style="margin-top:2px;">` : `<span style="margin-top:1px;">${p.klar ? "✅" : "⬜"}</span>`}
+          ${veckovis ? "" : checkboxarHtml}
           <div style="flex:1; min-width:0;">
-            <div style="font-weight:700; font-size:13px;">${p.aktivitet}</div>
-            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${p.beskrivning}</div>
-            <div style="font-size:11px; margin-top:4px; display:flex; flex-wrap:wrap; gap:8px;">
-              <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv && isChef() ? ` <a href="#" onclick="event.preventDefault(); openLagerChecklistaTilldela('${p.id}')" style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
-              ${p.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
+            <div style="font-weight:700; font-size:13px;">${forsta.aktivitet}${veckovis ? ` <span style="font-weight:400; color:var(--muted); font-size:11px;">(signeras varje vecka)</span>` : ""}</div>
+            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${forsta.beskrivning}</div>
+            ${forsta.underlag ? `<div style="font-size:10.5px; color:var(--green-700); margin-top:4px;">📎 ${forsta.underlag}</div>` : ""}
+            ${veckovis ? checkboxarHtml : ""}
+            <div style="font-size:11px; margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">
+              <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv && isChef() ? ` <a href="#" onclick="event.preventDefault(); openLagerChecklistaTilldela('${forsta.id}', ${JSON.stringify(rader.map(r => r.id))})" style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
+              ${!veckovis && forsta.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${forsta.signerad_signum} · ${fmtSvShort(isoDate(new Date(forsta.signerad_at)))} ${fmtTime(new Date(forsta.signerad_at))}</span>` : ""}
             </div>
           </div>
         </div>
@@ -4014,7 +4055,8 @@ async function toggleLagerChecklistaKlar(id, checked) {
   renderLagerChecklistaPoster(allaKlara);
 }
 
-function openLagerChecklistaTilldela(id) {
+function openLagerChecklistaTilldela(id, allaIds) {
+  const idsAttUppdatera = allaIds || [id];
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "lager-tilldela-overlay";
@@ -4028,17 +4070,19 @@ function openLagerChecklistaTilldela(id) {
           ${lagerChecklistaAllaProfiler.map(u => `<option value="${u.id}">${u.name}</option>`).join("")}
         </select>
       </div>
-      <button class="btn-primary" onclick="saveLagerChecklistaTilldelning('${id}')">Spara</button>
+      <button class="btn-primary" onclick='saveLagerChecklistaTilldelning(${JSON.stringify(idsAttUppdatera)})'>Spara</button>
       <button class="btn-secondary" onclick="document.getElementById('lager-tilldela-overlay').remove()">Avbryt</button>
     </div>
   `;
   document.body.appendChild(overlay);
 }
 
-async function saveLagerChecklistaTilldelning(id) {
+async function saveLagerChecklistaTilldelning(ids) {
   const val = document.getElementById("lager-tilldela-select").value || null;
-  const { error } = await sb.from("lager_checklista").update({ tilldelad_till: val }).eq("id", id);
-  if (error) { alert("Kunde inte spara: " + error.message); return; }
+  for (const id of ids) {
+    const { error } = await sb.from("lager_checklista").update({ tilldelad_till: val }).eq("id", id);
+    if (error) { alert("Kunde inte spara: " + error.message); return; }
+  }
   const overlay = document.getElementById("lager-tilldela-overlay");
   if (overlay) overlay.remove();
   await loadLagerChecklista(lagerChecklistaAr, lagerChecklistaManad);
