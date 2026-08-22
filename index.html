@@ -3867,6 +3867,11 @@ let lagerChecklistaManad = null;
 let lagerChecklistaView = "aktuell"; // "aktuell" | "tidigare"
 let lagerChecklistaAllaProfiler = [];
 
+async function goToLagerChecklista() {
+  await showLager();
+  await showLagerChecklista();
+}
+
 async function showLagerChecklista() {
   lagerSection = "checklista";
   lagerChecklistaView = "aktuell";
@@ -3880,8 +3885,6 @@ async function showLagerChecklista() {
 }
 
 async function ensureLagerChecklistaFinns(ar, manad) {
-  const { data } = await sb.from("lager_checklista").select("id").eq("ar", ar).eq("manad", manad);
-  if (data && data.length) return; // finns redan skapad denna månad
   const rows = [];
   LAGER_CHECKLISTA_AKTIVITETER.forEach(a => {
     if (a.veckovis) {
@@ -3892,7 +3895,27 @@ async function ensureLagerChecklistaFinns(ar, manad) {
       rows.push({ ar, manad, aktivitet: a.namn, beskrivning: a.beskrivning, underlag: a.underlag, vecka: 0 });
     }
   });
-  await sb.from("lager_checklista").insert(rows);
+  // Självläkande: lägger bara till de rader som saknas (t.ex. nya
+  // veckoposter för en aktivitet som tidigare bara fanns månadsvis).
+  // Rör aldrig redan existerande rader — signeringar och tilldelningar
+  // som redan gjorts denna månad påverkas inte.
+  await sb.from("lager_checklista").upsert(rows, { onConflict: "ar,manad,aktivitet,vecka", ignoreDuplicates: true });
+
+  // Städar bort ev. gamla månadsrader (vecka=0) för aktiviteter som nu är
+  // veckovisa — annars hade en överflödig femte ruta blivit kvar från innan.
+  const veckovisaNamn = LAGER_CHECKLISTA_AKTIVITETER.filter(a => a.veckovis).map(a => a.namn);
+  for (const namn of veckovisaNamn) {
+    const { error: cleanupError } = await sb.from("lager_checklista").delete().eq("ar", ar).eq("manad", manad).eq("aktivitet", namn).eq("vecka", 0);
+    if (cleanupError) console.error("Kunde inte städa bort gammal vecka-0-rad för " + namn, cleanupError);
+  }
+
+  // Fyller i beskrivning/underlag på ev. rader som redan fanns sedan innan
+  // (t.ex. månadsvisa aktiviteter, oförändrad struktur) — rör aldrig
+  // klar/signerad/tilldelad, bara referenstexten.
+  for (const a of LAGER_CHECKLISTA_AKTIVITETER) {
+    await sb.from("lager_checklista").update({ beskrivning: a.beskrivning, underlag: a.underlag })
+      .eq("ar", ar).eq("manad", manad).eq("aktivitet", a.namn);
+  }
 }
 
 async function loadLagerChecklista(ar, manad) {
@@ -5382,6 +5405,8 @@ async function renderTodayWidget(user) {
     pendingFriskanmalningar,
     unseenOnskemalSvar,
     tasksRes,
+    ,
+    lagerTilldeladeRes,
   ] = await Promise.all([
     loadFranvaroCache(),
     sb.from("tilldelade_uppgifter").select("*").eq("target_user_id", user.id).eq("is_done", false).order("deadline", { ascending: true }),
@@ -5391,9 +5416,13 @@ async function renderTodayWidget(user) {
     loadUnseenOnskemalSvar(),
     sb.from("uppgifter").select("*").eq("datum", todayIso),
     loadTraningData(allProfilesForToday),
+    sb.from("lager_checklista").select("*")
+      .eq("ar", new Date().getFullYear()).eq("manad", new Date().getMonth() + 1)
+      .eq("tilldelad_till", user.id).eq("klar", false),
   ]);
 
   const myPinnedTasks = pinnedTasksRes.data;
+  const myTilldeladeLagerposter = lagerTilldeladeRes.data || [];
   const { dagStjarna, veckaStjarna } = stjarnor;
   lastPendingFriskanmalningar = pendingFriskanmalningar;
   lastPendingOnskemal = pendingOnskemal;
@@ -5439,6 +5468,14 @@ async function renderTodayWidget(user) {
       </div>
     `);
   }
+  const uniqueLagerAktiviteter = [...new Set(myTilldeladeLagerposter.map(p => p.aktivitet))];
+  uniqueLagerAktiviteter.forEach(aktivitet => {
+    noticeBlocks.push(`
+      <div onclick="goToLagerChecklista()" style="cursor:pointer; background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:6px 10px; margin-bottom:4px; font-size:11.5px; font-weight:700; color:var(--green-700);">
+        📦 Tilldelad: ${aktivitet}
+      </div>
+    `);
+  });
   (myPinnedTasks || []).forEach(t => {
     const overdue = t.deadline < todayIso;
     noticeBlocks.push(`
