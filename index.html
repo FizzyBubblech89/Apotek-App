@@ -76,6 +76,7 @@
     color: var(--white);
     padding: 20px 20px 24px;
     border-radius: 0 0 22px 22px;
+    position: relative;
   }
   .topbar .greeting { font-size: 13px; opacity: 0.85; margin: 0 0 2px; font-family: var(--font-display); }
   .topbar .app-name { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; margin: 0; display: flex; align-items: center; gap: 8px; font-family: var(--font-display); transition: opacity 0.15s ease; }
@@ -96,7 +97,6 @@
   }
   .logout-btn:active { transform: scale(0.95); }
   .logout-btn:hover { background: rgba(255,255,255,0.25); }
-  .topbar { position: relative; }
 
   .topbar.with-back { display: flex; align-items: center; gap: 12px; padding: 18px 16px; border-radius: 0 0 18px 18px; }
   .back-btn {
@@ -365,7 +365,7 @@
 
   .kassa-row {
     display: flex; align-items: center; gap: 10px; padding: 9px 10px;
-    border-bottom: 1px solid var(--line); font-size: 12.5px;
+    border-bottom: 1px solid var(--line); font-size: 12.5px; cursor: pointer;
   }
   .kassa-row:last-child { border-bottom: none; }
   .kr-date { width: 62px; flex-shrink: 0; font-weight: 700; color: var(--muted); }
@@ -381,7 +381,6 @@
   .kr-delete:hover { color: #b3261e; }
   .kr-note-icon { font-size: 12px; flex-shrink: 0; opacity: 0.8; }
   .kr-check-icon { font-size: 11px; flex-shrink: 0; color: var(--green-700); font-weight: 700; }
-  .kassa-row { cursor: pointer; }
   .kassa-row-list { background: linear-gradient(150deg, #ffffff, #d9f0e2); border: 1px solid var(--green-300); border-radius: 18px; overflow: hidden; box-shadow: 0 3px 12px rgba(11,61,46,0.07); }
 
   .kassa-modal-overlay {
@@ -2261,12 +2260,18 @@ function editDayHeading(id, iso) {
   document.getElementById("personal-comment-rubrik").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-async function deletePersonalComment(id, iso) {
-  const { error } = await sb.from("schema_kommentarer").delete().eq("id", id);
-  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-  await loadPersonalComments();
-  renderPersonalDayComments(iso);
-  renderSchema();
+function deletePersonalComment(id, iso) {
+  confirmDelete(
+    "Ta bort kommentar?",
+    "Kommentaren tas bort permanent. Det går inte att ångra.",
+    async () => {
+      const { error } = await sb.from("schema_kommentarer").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadPersonalComments();
+      renderPersonalDayComments(iso);
+      renderSchema();
+    }
+  );
 }
 
 /* ---- Önskemål: notis till chef ---- */
@@ -3584,11 +3589,18 @@ async function submitInkopMall() {
   renderInkopMallarList();
 }
 
-async function deleteInkopMall(id) {
-  const { error } = await sb.from("inkop_mallar").delete().eq("id", id);
-  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-  await loadInkop();
-  renderInkopMallarList();
+function deleteInkopMall(id) {
+  const m = inkopMallarCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort vara?",
+    `<strong>${m ? m.namn : "Varan"}</strong> tas bort permanent ur listan över vanliga varor. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("inkop_mallar").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadInkop();
+      renderInkopMallarList();
+    }
+  );
 }
 
 /* ---- Snabblänkar ---- */
@@ -4228,11 +4240,18 @@ async function submitInventeringsplanPost() {
   renderInventeringsplanList();
 }
 
-async function deleteInventeringsplanPost(id) {
-  const { error } = await sb.from("lager_inventeringsplan").delete().eq("id", id);
-  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-  lagerInventeringsplanCache = lagerInventeringsplanCache.filter(p => p.id !== id);
-  renderInventeringsplanList();
+function deleteInventeringsplanPost(id) {
+  const p = lagerInventeringsplanCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort ur planen?",
+    `<strong>${p ? p.sektion : "Posten"}</strong> tas bort permanent ur inventeringsplanen. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("lager_inventeringsplan").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      lagerInventeringsplanCache = lagerInventeringsplanCache.filter(x => x.id !== id);
+      renderInventeringsplanList();
+    }
+  );
 }
 
 function exportLagerChecklistaPdf(ar, manad) {
@@ -5676,11 +5695,17 @@ async function submitSharedDayComment(iso) {
   renderSharedDayComments(iso);
 }
 
-async function deleteSharedDayComment(id, iso) {
-  const { error } = await sb.from("schema_kommentarer").delete().eq("id", id);
-  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-  await loadSharedDayComments();
-  renderSharedDayComments(iso);
+function deleteSharedDayComment(id, iso) {
+  confirmDelete(
+    "Ta bort kommentar?",
+    "Kommentaren tas bort permanent, synlig för alla. Det går inte att ångra.",
+    async () => {
+      const { error } = await sb.from("schema_kommentarer").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadSharedDayComments();
+      renderSharedDayComments(iso);
+    }
+  );
 }
 
 /* ---- Idag-widget (hemskärmen) ---- */
@@ -5941,10 +5966,16 @@ async function toggleSharedDayTask(id, checked, iso) {
   await loadAndRenderSharedDayTasks(iso);
 }
 
-async function deleteSharedDayTask(id, iso) {
-  const { error } = await sb.from("uppgifter").delete().eq("id", id);
-  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-  await loadAndRenderSharedDayTasks(iso);
+function deleteSharedDayTask(id, iso) {
+  confirmDelete(
+    "Ta bort uppgift?",
+    "Uppgiften tas bort permanent. Det går inte att ångra.",
+    async () => {
+      const { error } = await sb.from("uppgifter").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadAndRenderSharedDayTasks(iso);
+    }
+  );
 }
 
 async function submitSharedDayTask(iso) {
