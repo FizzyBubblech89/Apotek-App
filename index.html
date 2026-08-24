@@ -98,7 +98,10 @@
   .logout-btn:active { transform: scale(0.95); }
   .logout-btn:hover { background: rgba(255,255,255,0.25); }
 
-  .topbar.with-back { display: flex; align-items: center; gap: 12px; padding: 18px 16px; border-radius: 0 0 18px 18px; }
+  .topbar.with-back {
+    display: flex; align-items: center; gap: 12px; padding: 18px 16px; border-radius: 0 0 18px 18px;
+    position: sticky; top: 0; z-index: 20;
+  }
   .back-btn {
     background: rgba(255,255,255,0.18); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255,255,255,0.25); color: var(--white); width: 36px; height: 36px; border-radius: 10px;
@@ -4453,11 +4456,11 @@ if (typeof pdfjsLib !== "undefined") {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 }
 const kampanjThumbCache = {}; // pdfUrl -> dataURL, undviker att göra om samma dyra rendering flera gånger i samma session
-async function renderPdfThumbnail(pdfUrl, containerId) {
+async function renderPdfThumbnail(pdfUrl, containerId, kampanjId) {
   const container = document.getElementById(containerId);
   if (!container) return;
   if (kampanjThumbCache[pdfUrl]) {
-    container.innerHTML = `<img src="${kampanjThumbCache[pdfUrl]}" style="width:100%; display:block;">`;
+    container.innerHTML = `<img src="${kampanjThumbCache[pdfUrl]}" style="width:100%; display:block;" loading="lazy">`;
     return;
   }
   if (typeof pdfjsLib === "undefined") return;
@@ -4466,7 +4469,7 @@ async function renderPdfThumbnail(pdfUrl, containerId) {
     const page = await pdf.getPage(1);
     const targetWidth = container.clientWidth || 320;
     const unscaled = page.getViewport({ scale: 1 });
-    const scale = (targetWidth * 2) / unscaled.width; // 2x för skärpa
+    const scale = targetWidth / unscaled.width; // 1x — tillräckligt skarpt för en listminiatyr, klart mindre filstorlek än tidigare 2x
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
@@ -4474,7 +4477,23 @@ async function renderPdfThumbnail(pdfUrl, containerId) {
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
     const dataUrl = canvas.toDataURL("image/png");
     kampanjThumbCache[pdfUrl] = dataUrl;
-    container.innerHTML = `<img src="${dataUrl}" style="width:100%; display:block;">`;
+    container.innerHTML = `<img src="${dataUrl}" style="width:100%; display:block;" loading="lazy">`;
+
+    // Sparar permanent så nästa besök (av vem som helst) slipper göra om
+    // hela den tunga PDF-bearbetningen — det är den faktiska boven bakom
+    // segheten, inte bara ett cacheproblem för den aktuella sessionen.
+    if (kampanjId) {
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const path = `backfill/${kampanjId}-${Date.now()}.png`;
+        const { error: uploadError } = await sb.storage.from("kampanjer").upload(path, blob);
+        if (uploadError) { console.error("Kunde inte spara backfillad miniatyr", uploadError); return; }
+        const { data: publicUrlData } = sb.storage.from("kampanjer").getPublicUrl(path);
+        await sb.from("kampanjer").update({ thumbnail_url: publicUrlData.publicUrl }).eq("id", kampanjId);
+        const k = kampanjCache.find(x => x.id === kampanjId);
+        if (k) k.thumbnail_url = publicUrlData.publicUrl;
+      }, "image/png");
+    }
   } catch (err) {
     console.error("Kunde inte rendera PDF-förhandsvisning", err);
     if (container) container.innerHTML = `<div style="display:flex; align-items:center; justify-content:center; height:100%; color:var(--muted); font-size:11px; text-align:center; padding:12px;">Kunde inte visa förhandsvisning</div>`;
@@ -4531,7 +4550,7 @@ function renderKampanjView() {
 
   // Bara äldre kampanjer utan sparad miniatyr behöver den långsammare
   // metoden — och den cachas nu i minnet så den bara körs en gång per session.
-  list.filter(k => !k.thumbnail_url).forEach(k => renderPdfThumbnail(k.pdf_url, `kampanj-thumb-${k.id}`));
+  list.filter(k => !k.thumbnail_url).forEach(k => renderPdfThumbnail(k.pdf_url, `kampanj-thumb-${k.id}`, k.id));
 }
 
 function openNewKampanjModal() {
