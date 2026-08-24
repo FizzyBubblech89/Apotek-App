@@ -47,6 +47,16 @@
     max-width: 480px; margin: 0 auto; min-height: 100vh; background: var(--white); box-shadow: var(--shadow-lg);
     position: relative; display: flex; flex-direction: column; overflow-x: hidden;
   }
+  /* Datoranpassning — bredare arbetsyta på större skärmar, telefon-layouten
+     rörs inte alls under 768px bred skärm. */
+  @media (min-width: 768px) {
+    body { display: flex; justify-content: center; }
+    .app { max-width: 820px; box-shadow: 0 0 60px rgba(11,61,46,0.12); min-height: 100vh; }
+    .btn-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  }
+  @media (min-width: 1200px) {
+    .app { max-width: 1040px; }
+  }
   .app::before, .app::after {
     content: ""; position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; z-index: 0;
   }
@@ -2262,6 +2272,64 @@ async function deletePersonalComment(id, iso) {
 /* ---- Önskemål: notis till chef ---- */
 let lastPendingOnskemal = [];
 let lastHomeNoticeBlocks = [];
+
+let notisSnoozeMap = {}; // notis_key -> snoozed_until (ISO), bara aktiva (ej förfallna) tystningar
+
+function isNotisSnoozed(key) {
+  return !!notisSnoozeMap[key];
+}
+
+function notisMuteButtonHtml(key) {
+  return `<span onclick="event.stopPropagation(); openSnoozeMeny('${key}')" title="Tysta notis" style="cursor:pointer; flex-shrink:0; opacity:0.6; font-size:12px; padding:2px 4px;">🔕</span>`;
+}
+
+function openSnoozeMeny(key) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "snooze-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Tysta notis</div>
+      <div class="kassa-modal-note" style="margin-top:0;">Notisen döljs för dig under vald tid, sen visas den igen om den fortfarande är aktuell.</div>
+      <button class="btn-secondary" onclick="snoozeNotis('${key}', 1)">🔕 1 timme</button>
+      <button class="btn-secondary" onclick="snoozeNotis('${key}', 24)">🔕 1 dag</button>
+      <button class="btn-secondary" onclick="snoozeNotis('${key}', 24 * 7)">🔕 1 vecka</button>
+      <div class="field-group" style="margin-top:10px;">
+        <label class="field-label">Eller välj datum och tid</label>
+        <input class="field-input" id="snooze-custom-datetime" type="datetime-local">
+      </div>
+      <button class="btn-secondary" onclick="snoozeNotisCustom('${key}')">Tysta till valt datum</button>
+      <button class="btn-secondary" onclick="document.getElementById('snooze-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function snoozeNotis(key, timmar) {
+  const until = new Date(Date.now() + timmar * 60 * 60 * 1000).toISOString();
+  await saveSnoozeNotis(key, until);
+}
+
+async function snoozeNotisCustom(key) {
+  const val = document.getElementById("snooze-custom-datetime").value;
+  if (!val) { alert("Välj ett datum och en tid först."); return; }
+  await saveSnoozeNotis(key, new Date(val).toISOString());
+}
+
+async function saveSnoozeNotis(key, untilIso) {
+  const user = getCurrentUser();
+  const { error } = await sb.from("notis_snooze").upsert(
+    { user_id: user.id, notis_key: key, snoozed_until: untilIso },
+    { onConflict: "user_id,notis_key" }
+  );
+  if (error) { alert("Kunde inte tysta notisen: " + error.message); return; }
+  const overlay = document.getElementById("snooze-overlay");
+  if (overlay) overlay.remove();
+  await renderTodayWidget(user);
+}
+
+
 let lastPendingFriskanmalningar = [];
 let lastAllProfilesForToday = [];
 let lastUnseenOnskemalSvar = [];
@@ -3665,6 +3733,7 @@ function renderLagerList() {
             <div style="font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
               ${lagerPersonLineHtml(a.signum, a.created_at)}${a.hanterad ? ` → ${lagerPersonLineHtml(a.hanterad_signum, a.hanterad_datum)}` : ""}
             </div>
+            ${a.hanterad && a.hanterad_kommentar ? `<div style="font-size:10.5px; color:var(--green-700); margin-top:1px;">💬 ${a.hanterad_kommentar}</div>` : ""}
           </div>
           <button class="kr-edit" onclick="openEditLagerModal('${a.id}')" aria-label="Redigera" style="flex-shrink:0;">✎</button>
           ${isChef() ? `<button class="kr-delete" onclick="deleteLageravvikelse('${a.id}')" aria-label="Ta bort" style="flex-shrink:0;">✕</button>` : ""}
@@ -3747,11 +3816,45 @@ async function submitLageravvikelse() {
   renderLagerList();
 }
 
-async function toggleLagerHanterad(id, checked) {
+function toggleLagerHanterad(id, checked) {
+  if (!checked) {
+    saveLagerHanterad(id, false, ""); // återöppna - ingen kommentar behövs
+    return;
+  }
+  openLagerAvslutaModal(id);
+}
+
+function openLagerAvslutaModal(id) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "lager-avsluta-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) { overlay.remove(); renderLagerList(); } };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Avsluta avvikelse</div>
+      <div class="field-group">
+        <label class="field-label">Kommentar (valfritt)</label>
+        <textarea class="field-input" id="lager-avsluta-kommentar" style="min-height:60px;" placeholder="T.ex. hur avvikelsen korrigerades..."></textarea>
+      </div>
+      <button class="btn-primary" onclick="confirmLagerAvsluta('${id}')">Avsluta</button>
+      <button class="btn-secondary" onclick="document.getElementById('lager-avsluta-overlay').remove(); renderLagerList();">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function confirmLagerAvsluta(id) {
+  const kommentar = document.getElementById("lager-avsluta-kommentar").value.trim();
+  await saveLagerHanterad(id, true, kommentar);
+  const overlay = document.getElementById("lager-avsluta-overlay");
+  if (overlay) overlay.remove();
+}
+
+async function saveLagerHanterad(id, checked, kommentar) {
   const user = getCurrentUser();
   const patch = checked
-    ? { hanterad: true, hanterad_datum: new Date().toISOString(), hanterad_av: user.id, hanterad_signum: user.signum }
-    : { hanterad: false, hanterad_datum: null, hanterad_av: null, hanterad_signum: null };
+    ? { hanterad: true, hanterad_datum: new Date().toISOString(), hanterad_av: user.id, hanterad_signum: user.signum, hanterad_kommentar: kommentar }
+    : { hanterad: false, hanterad_datum: null, hanterad_av: null, hanterad_signum: null, hanterad_kommentar: "" };
   const { error } = await sb.from("lageravvikelser").update(patch).eq("id", id);
   if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
   await loadLageravvikelser();
@@ -4070,13 +4173,42 @@ function renderInventeringsplanList() {
   const sorterad = [...lagerInventeringsplanCache].sort((a, b) => a.manad - b.manad);
   wrap.innerHTML = sorterad.length
     ? `<div class="kassa-row-list">${sorterad.map(p => `
-        <div class="kassa-row" style="cursor:default;">
+        <div class="kassa-row" style="cursor:default;" id="inventeringsplan-row-${p.id}">
           <div style="width:80px; flex-shrink:0; font-weight:700; color:var(--green-700); font-size:12px;">${LAGER_MANADSNAMN[p.manad]}</div>
           <div style="flex:1; min-width:0;">${p.sektion}</div>
+          <button class="kr-edit" onclick="openEditInventeringsplanRad('${p.id}')" aria-label="Redigera">✎</button>
           <button class="kr-delete" onclick="deleteInventeringsplanPost('${p.id}')" aria-label="Ta bort">✕</button>
         </div>
       `).join("")}</div>`
     : `<div class="empty-state">Ingen plan tillagd ännu.</div>`;
+}
+
+function openEditInventeringsplanRad(id) {
+  const p = lagerInventeringsplanCache.find(x => x.id === id);
+  if (!p) return;
+  const row = document.getElementById(`inventeringsplan-row-${id}`);
+  if (!row) return;
+  row.innerHTML = `
+    <div style="flex:1; display:flex; gap:6px; align-items:center; padding:4px 0;">
+      <input class="field-input" id="inventeringsplan-edit-sektion-${id}" type="text" value="${p.sektion}" style="flex:1; padding:8px 10px; font-size:13px;">
+      <select class="field-input" id="inventeringsplan-edit-manad-${id}" style="width:100px; padding:8px 6px; font-size:12px;">
+        ${LAGER_MANADSNAMN.slice(1).map((namn, i) => `<option value="${i + 1}" ${p.manad === i + 1 ? "selected" : ""}>${namn}</option>`).join("")}
+      </select>
+    </div>
+    <button class="kr-edit" onclick="saveInventeringsplanRad('${id}')" aria-label="Spara">✔</button>
+    <button class="kr-delete" onclick="renderInventeringsplanList()" aria-label="Avbryt">✕</button>
+  `;
+}
+
+async function saveInventeringsplanRad(id) {
+  const sektion = document.getElementById(`inventeringsplan-edit-sektion-${id}`).value.trim();
+  const manad = parseInt(document.getElementById(`inventeringsplan-edit-manad-${id}`).value);
+  if (!sektion) { alert("Skriv en sektion."); return; }
+  const { error } = await sb.from("lager_inventeringsplan").update({ sektion, manad }).eq("id", id);
+  if (error) { alert("Kunde inte spara: " + error.message); return; }
+  const p = lagerInventeringsplanCache.find(x => x.id === id);
+  if (p) { p.sektion = sektion; p.manad = manad; }
+  renderInventeringsplanList();
 }
 
 async function submitInventeringsplanPost() {
@@ -5578,6 +5710,7 @@ async function renderTodayWidget(user) {
     tasksRes,
     ,
     lagerTilldeladeRes,
+    snoozeRes,
   ] = await Promise.all([
     loadFranvaroCache(),
     sb.from("tilldelade_uppgifter").select("*").eq("target_user_id", user.id).eq("is_done", false).order("deadline", { ascending: true }),
@@ -5590,7 +5723,13 @@ async function renderTodayWidget(user) {
     sb.from("lager_checklista").select("*")
       .eq("ar", new Date().getFullYear()).eq("manad", new Date().getMonth() + 1)
       .eq("tilldelad_till", user.id).eq("klar", false),
+    sb.from("notis_snooze").select("*").eq("user_id", user.id),
   ]);
+
+  notisSnoozeMap = {};
+  (snoozeRes.data || []).forEach(s => {
+    if (new Date(s.snoozed_until) > new Date()) notisSnoozeMap[s.notis_key] = s.snoozed_until;
+  });
 
   const myPinnedTasks = pinnedTasksRes.data;
   const myTilldeladeLagerposter = lagerTilldeladeRes.data || [];
@@ -5618,36 +5757,41 @@ async function renderTodayWidget(user) {
      om det blir fler än 5, samla dem bakom en enda rad. */
   const noticeBlocks = [];
 
-  if (pendingOnskemal.length) {
+  if (pendingOnskemal.length && !isNotisSnoozed("onskemal-pending")) {
     noticeBlocks.push(`
       <div onclick="openOnskemalModal(lastPendingOnskemal, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
-        📋 ${pendingOnskemal.length} önskemål väntar — tryck för att hantera
+        <span style="flex:1;">📋 ${pendingOnskemal.length} önskemål väntar — tryck för att hantera</span>
+        ${notisMuteButtonHtml("onskemal-pending")}
       </div>
     `);
   }
-  if (pendingFriskanmalningar.length) {
+  if (pendingFriskanmalningar.length && !isNotisSnoozed("friskanmalning-pending")) {
     noticeBlocks.push(`
       <div onclick="openFriskanmalningModal(lastPendingFriskanmalningar, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
-        🩺 ${pendingFriskanmalningar.length} friskanmälan${pendingFriskanmalningar.length === 1 ? "" : "ar"} väntar — tryck för att bekräfta
+        <span style="flex:1;">🩺 ${pendingFriskanmalningar.length} friskanmälan${pendingFriskanmalningar.length === 1 ? "" : "ar"} väntar — tryck för att bekräfta</span>
+        ${notisMuteButtonHtml("friskanmalning-pending")}
       </div>
     `);
   }
-  if (unseenOnskemalSvar.length) {
+  if (unseenOnskemalSvar.length && !isNotisSnoozed("onskemal-svar-unseen")) {
     noticeBlocks.push(`
       <div onclick="openOnskemalSvarModal(lastUnseenOnskemalSvar)" style="cursor:pointer; background:var(--green-100); border:1px solid var(--green-300); border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
-        ✅ Chefen har svarat på ${unseenOnskemalSvar.length === 1 ? "ditt önskemål" : `${unseenOnskemalSvar.length} önskemål`} — tryck för att se
+        <span style="flex:1;">✅ Chefen har svarat på ${unseenOnskemalSvar.length === 1 ? "ditt önskemål" : `${unseenOnskemalSvar.length} önskemål`} — tryck för att se</span>
+        ${notisMuteButtonHtml("onskemal-svar-unseen")}
       </div>
     `);
   }
-  const uniqueLagerAktiviteter = [...new Set(myTilldeladeLagerposter.map(p => p.aktivitet))];
+  const uniqueLagerAktiviteter = [...new Set(myTilldeladeLagerposter.map(p => p.aktivitet))]
+    .filter(aktivitet => !isNotisSnoozed(`lager-tilldelning-${aktivitet}`));
   uniqueLagerAktiviteter.forEach(aktivitet => {
     noticeBlocks.push(`
-      <div onclick="goToLagerChecklista()" style="cursor:pointer; background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:6px 10px; margin-bottom:4px; font-size:11.5px; font-weight:700; color:var(--green-700);">
-        📦 Tilldelad: ${aktivitet}
+      <div onclick="goToLagerChecklista()" style="cursor:pointer; background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:6px 10px; margin-bottom:4px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
+        <span style="flex:1;">📦 Tilldelad: ${aktivitet}</span>
+        ${notisMuteButtonHtml(`lager-tilldelning-${aktivitet}`)}
       </div>
     `);
   });
-  (myPinnedTasks || []).forEach(t => {
+  (myPinnedTasks || []).filter(t => !isNotisSnoozed(`task-${t.id}`)).forEach(t => {
     const overdue = t.deadline < todayIso;
     noticeBlocks.push(`
       <div style="display:flex; align-items:flex-start; gap:6px; background:${overdue ? "#fdecec" : t.prioritet === "rod" ? "#fdecec" : t.prioritet === "gul" ? "#fff3d6" : "var(--green-050)"}; border:1px solid ${overdue ? "#b3261e" : t.prioritet === "rod" ? "#f3b9b9" : t.prioritet === "gul" ? "#f0dba3" : "var(--green-300)"}; border-radius:10px; padding:6px 8px; margin-bottom:4px;">
@@ -5661,10 +5805,11 @@ async function renderTodayWidget(user) {
           </div>
           <div style="font-size:12px; font-weight:600; margin-top:1px;">${t.text}</div>
         </div>
+        ${notisMuteButtonHtml(`task-${t.id}`)}
       </div>
     `);
   });
-  activeTraningar.forEach(t => {
+  activeTraningar.filter(t => !isNotisSnoozed(`traning-${t.id}`)).forEach(t => {
     const teamTop2 = teamLeaderboardFor(t.id).slice(0, 2);
     const individualTop2 = leaderboardFor(t.id).slice(0, 2);
     if (!teamTop2.length && !individualTop2.length) return;
@@ -5694,7 +5839,7 @@ async function renderTodayWidget(user) {
     const resultInputRow = jagArDeltagare ? `<div id="home-traning-error-${t.id}" style="color:#b3261e; font-size:10px; font-weight:700; margin-top:1px; text-align:right;"></div>` : "";
     noticeBlocks.push(`
       <div onclick="openTraningDetailModal('${t.id}')" style="cursor:pointer; background:#fff8f0; border:1px solid #f3b989; border-radius:10px; padding:6px 10px; margin-bottom:6px;">
-        <div style="font-size:11.5px; font-weight:800; display:flex; align-items:center; gap:5px;">🏆 ${t.titel} <span style="font-weight:400; color:var(--muted); font-size:10px;">· mer info</span></div>
+        <div style="font-size:11.5px; font-weight:800; display:flex; align-items:center; gap:5px;"><span style="flex:1;">🏆 ${t.titel} <span style="font-weight:400; color:var(--muted); font-size:10px;">· mer info</span></span>${notisMuteButtonHtml(`traning-${t.id}`)}</div>
         ${teamRow}${individualRow}
         ${resultInputRow}
       </div>
