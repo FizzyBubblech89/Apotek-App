@@ -4489,7 +4489,7 @@ const KVALITET_AKTIVITETER = [
   { namn: "Hållbarhetskontroll", beskrivning: "Hållbarhetskontroll genomförd enligt instruktion och dokumenterad på Checklista Varuansvarig aktiviteter per månad.", frekvens: "Månadsvis", fetstil: false },
   { namn: "Lagersaldo utgångna varor", beskrivning: "Rapport 1014 tas ut en gång i veckan, dokumenteras på Checklista varuansvarig aktiviteter per månad.", frekvens: "Månadsvis", fetstil: false },
   { namn: "Destruktionskartonger", beskrivning: "Aktiverade destruktionskartonger mottagna av Tamro.", frekvens: "Månadsvis", fetstil: false },
-  { namn: "Tagit del av medarbetare per rutinsläpp", beskrivning: "Påminn medarbetarna om rutinsläpp och följ upp resultatet. Kontrollera korrekt befattning/roller i adressboken samt individuella tillägg.", frekvens: "Kvartalsvis", fetstil: false },
+  { namn: "Tagit del av medarbetare per rutinsläpp", beskrivning: "Påminn medarbetarna om rutinsläpp och följ upp resultatet. Kontrollera korrekt befattning/roller i adressboken samt individuella tillägg.", frekvens: "Kvartalsvis", fetstil: false, ejAktuellOption: true },
   { namn: "Kompetensuppföljning", beskrivning: "Alla medarbetare inkl. timmisar genomför kompetensutveckling i LH, AC dokumenterar på blankett i medarbetarpärmen.", frekvens: "Kvartalsvis", fetstil: false },
   { namn: "Damning", beskrivning: "Damning utförs enligt lokal rutin, dokumentation ska finnas.", frekvens: "Kvartalsvis", fetstil: false },
   { namn: "Kontroll larmkoder", beskrivning: "Larmkoder inventerade enligt rutin, dokumentation ska finnas.", frekvens: "Kvartalsvis", fetstil: false },
@@ -4618,17 +4618,27 @@ function renderKvalitetPoster() {
 function kvalitetPosterHtml(interaktiv) {
   return kvalitetCache.map(p => {
     const tilldelad = kvalitetAllaProfiler.find(u => u.id === p.tilldelad_till);
+    const konfig = KVALITET_AKTIVITETER.find(a => a.namn === p.aktivitet);
     return `
       <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; ${p.klar ? "background:var(--green-050);" : ""}">
         <div style="display:flex; align-items:flex-start; gap:8px;">
-          ${interaktiv ? `<input type="checkbox" ${p.klar ? "checked" : ""} onchange="toggleKvalitetKlar('${p.id}', this.checked)" style="margin-top:2px;">` : `<span style="margin-top:1px;">${p.klar ? "✅" : "⬜"}</span>`}
+          ${interaktiv ? `<input type="checkbox" ${p.klar && !p.ej_aktuellt ? "checked" : ""} onchange="toggleKvalitetKlar('${p.id}', this.checked)" style="margin-top:2px;">` : `<span style="margin-top:1px;">${p.klar && !p.ej_aktuellt ? "✅" : "⬜"}</span>`}
           <div style="flex:1; min-width:0;">
             <div style="font-weight:${p.fetstil ? "800" : "700"}; font-size:13px;">${p.aktivitet}${p.fetstil ? ` <span style="font-size:10px; color:#b5590a; font-weight:700;">LMA</span>` : ""}</div>
             <div style="font-size:10.5px; color:var(--green-700); font-weight:700; margin-top:2px;">${p.frekvens}</div>
             <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${p.beskrivning}</div>
+            ${konfig && konfig.ejAktuellOption ? `
+              <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:11px; ${p.ej_aktuellt ? "color:var(--green-700); font-weight:700;" : "color:var(--muted);"}">
+                ${interaktiv
+                  ? `<input type="checkbox" ${p.ej_aktuellt ? "checked" : ""} onchange="toggleKvalitetEjAktuellt('${p.id}', this.checked)">`
+                  : `<span>${p.ej_aktuellt ? "☑" : "☐"}</span>`}
+                Ej aktuellt för denna månad
+              </label>
+            ` : ""}
             <div style="font-size:11px; margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">
               <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv ? ` <a href="#" onclick='event.preventDefault(); openKvalitetTilldela("${p.id}")' style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
-              ${p.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
+              ${p.klar && p.ej_aktuellt ? `<span style="color:var(--green-700); font-weight:700;">Ej aktuellt · markerat av ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
+              ${p.klar && !p.ej_aktuellt ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
             </div>
           </div>
         </div>
@@ -4640,8 +4650,19 @@ function kvalitetPosterHtml(interaktiv) {
 async function toggleKvalitetKlar(id, checked) {
   const user = getCurrentUser();
   const patch = checked
-    ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
-    : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null };
+    ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString(), ej_aktuellt: false }
+    : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null, ej_aktuellt: false };
+  const { error } = await sb.from("kvalitet_checklista").update(patch).eq("id", id);
+  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
+  await loadKvalitetManad(kvalitetAr, kvalitetManad);
+  renderKvalitetPoster();
+}
+
+async function toggleKvalitetEjAktuellt(id, checked) {
+  const user = getCurrentUser();
+  const patch = checked
+    ? { klar: true, ej_aktuellt: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
+    : { klar: false, ej_aktuellt: false, signerad_av: null, signerad_signum: null, signerad_at: null };
   const { error } = await sb.from("kvalitet_checklista").update(patch).eq("id", id);
   if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
   await loadKvalitetManad(kvalitetAr, kvalitetManad);
@@ -4708,6 +4729,7 @@ async function renderKvalitetTidigareLista() {
 
 async function openKvalitetTidigareMonad(ar, manad) {
   await loadKvalitetManad(ar, manad);
+  const allaKlara = kvalitetCache.length > 0 && kvalitetCache.every(p => p.klar);
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "kvalitet-manad-overlay";
@@ -4715,6 +4737,9 @@ async function openKvalitetTidigareMonad(ar, manad) {
   overlay.innerHTML = `
     <div class="kassa-modal-card" style="max-width:420px;">
       <div class="kassa-modal-title">${LAGER_MANADSNAMN[manad]} ${ar}</div>
+      ${allaKlara
+        ? `<button class="btn-primary" onclick="exportKvalitetPdf(${ar}, ${manad})" style="margin-bottom:14px;">📄 Exportera PDF för utskrift</button>`
+        : `<div style="font-size:11.5px; color:var(--muted); margin-bottom:14px;">Månaden är inte helt ifylld ännu — PDF-export blir tillgänglig när allt är signerat eller markerat ej aktuellt.</div>`}
       <div id="kvalitet-manad-poster"></div>
       <button class="btn-secondary" onclick="document.getElementById('kvalitet-manad-overlay').remove()">Stäng</button>
     </div>
@@ -4723,17 +4748,125 @@ async function openKvalitetTidigareMonad(ar, manad) {
   document.getElementById("kvalitet-manad-poster").innerHTML = kvalitetPosterHtml(false);
 }
 
+function exportKvalitetPdf(ar, manad) {
+  if (!window.jspdf) { alert("PDF-biblioteket kunde inte laddas."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 18;
+
+  doc.setFontSize(14);
+  doc.text("Kom ihåg-lista - Läkemedelsansvarig (LMA)", 14, y); y += 6;
+  doc.setFontSize(10);
+  doc.setTextColor(120);
+  doc.text(`${LAGER_MANADSNAMN[manad]} ${ar}`, 14, y); y += 9;
+  doc.setTextColor(0);
+
+  kvalitetCache.forEach(p => {
+    const tilldelad = kvalitetAllaProfiler.find(u => u.id === p.tilldelad_till);
+    if (y > 265) { doc.addPage(); y = 20; }
+
+    doc.setFontSize(10.5);
+    doc.setFont(undefined, "bold");
+    doc.text(`${p.aktivitet}${p.fetstil ? " (LMA)" : ""}`, 14, y); y += 4.8;
+
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(8.5);
+    doc.text(`Frekvens: ${p.frekvens}`, 14, y); y += 4.2;
+
+    const statusRad = p.ej_aktuellt
+      ? `Ej aktuellt denna månad — markerat av ${p.signerad_signum}, ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}`
+      : p.klar
+        ? `Signerad — ${p.signerad_signum}, ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}`
+        : "Ej signerad";
+    doc.text(statusRad, 14, y); y += 4.2;
+    doc.text(`Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}`, 14, y); y += 6.5;
+  });
+
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  doc.text(`Exporterad ${fmtSvFull(isoDate(new Date()))}`, 14, 290);
+
+  doc.save(`kvalitet-lma-checklista-${ar}-${String(manad).padStart(2, "0")}.pdf`);
+}
+
 function renderKvalitetVidBehov() {
   const contentWrap = document.getElementById("kvalitet-content");
   contentWrap.innerHTML = `
-    <div style="font-size:11.5px; color:var(--muted); margin:14px 0;">Dessa aktiviteter görs vid behov, inte enligt ett fast schema — därför bockas de inte av per månad. Ren referenslista.</div>
+    <div style="font-size:11.5px; color:var(--muted); margin:14px 0;">Dessa aktiviteter görs vid behov, inte enligt ett fast schema — därför bockas de inte av per månad. Tryck på en aktivitet för att skriva en kommentar.</div>
     ${KVALITET_VID_BEHOV.map(a => `
-      <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px;">
+      <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; cursor:pointer;" onclick="openVidBehovModal('${a.namn.replace(/'/g, "\\'")}')">
         <div style="font-weight:700; font-size:13px;">${a.namn}</div>
         <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${a.beskrivning}</div>
+        <div id="vidbehov-senaste-${KVALITET_VID_BEHOV.indexOf(a)}" style="font-size:10.5px; color:var(--green-700); margin-top:4px;"></div>
       </div>
     `).join("")}
   `;
+  loadVidBehovSenasteKommentarer();
+}
+
+async function loadVidBehovSenasteKommentarer() {
+  const { data } = await sb.from("kvalitet_vidbehov_kommentar").select("*").order("created_at", { ascending: false });
+  KVALITET_VID_BEHOV.forEach((a, i) => {
+    const senaste = (data || []).find(k => k.aktivitet === a.namn);
+    const el = document.getElementById(`vidbehov-senaste-${i}`);
+    if (el && senaste) el.textContent = `💬 Senast: ${senaste.kommentar} (${senaste.signum}, ${fmtSvShort(isoDate(new Date(senaste.created_at)))})`;
+  });
+}
+
+function openVidBehovModal(aktivitetNamn) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "vidbehov-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${aktivitetNamn}</div>
+      <div class="field-group">
+        <label class="field-label">Ny kommentar</label>
+        <textarea class="field-input" id="vidbehov-kommentar-input" style="min-height:70px;" placeholder="T.ex. datum och vad som gjordes..."></textarea>
+      </div>
+      <div id="vidbehov-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick='submitVidBehovKommentar("${aktivitetNamn.replace(/"/g, "&quot;")}")'>Spara kommentar</button>
+
+      <div class="kassa-section-title" style="margin-top:20px;">Tidigare kommentarer</div>
+      <div id="vidbehov-kommentar-list"></div>
+      <button class="btn-secondary" onclick="document.getElementById('vidbehov-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  renderVidBehovKommentarList(aktivitetNamn);
+}
+
+async function renderVidBehovKommentarList(aktivitetNamn) {
+  const wrap = document.getElementById("vidbehov-kommentar-list");
+  const { data } = await sb.from("kvalitet_vidbehov_kommentar").select("*").eq("aktivitet", aktivitetNamn).order("created_at", { ascending: false });
+  const rows = data || [];
+  wrap.innerHTML = rows.length
+    ? `<div class="kassa-row-list">${rows.map(k => `
+        <div class="kassa-row" style="cursor:default; align-items:flex-start;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:12.5px;">${k.kommentar}</div>
+            <div style="font-size:10.5px; color:var(--muted); margin-top:2px;">${k.signum} · ${fmtSvShort(isoDate(new Date(k.created_at)))} ${fmtTime(new Date(k.created_at))}</div>
+          </div>
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">Inga kommentarer ännu.</div>`;
+}
+
+async function submitVidBehovKommentar(aktivitetNamn) {
+  const kommentar = document.getElementById("vidbehov-kommentar-input").value.trim();
+  const errorBox = document.getElementById("vidbehov-error");
+  if (!kommentar) { errorBox.textContent = "Skriv en kommentar."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("kvalitet_vidbehov_kommentar").insert({
+    aktivitet: aktivitetNamn, kommentar, signum: user.signum, created_by: user.id,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  document.getElementById("vidbehov-kommentar-input").value = "";
+  errorBox.textContent = "";
+  await renderVidBehovKommentarList(aktivitetNamn);
 }
 
 async function showKampanj() {
