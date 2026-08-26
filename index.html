@@ -1981,6 +1981,7 @@ function init() {
 async function showSchema() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-shared-schema").style.display = "none";
+  document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-schema").style.display = "block";
   weekOffset = 0; monthOffset = 0;
   await Promise.all([loadEventsForCurrentUser(), loadFranvaroCache(), loadPersonalComments(), loadDayHeadings()]);
@@ -4929,6 +4930,8 @@ let ledighetDraft = { franDatum: "", tillDatum: "", kommentar: "" };
 
 async function showLedighet() {
   document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-schema").style.display = "none";
+  document.getElementById("view-shared-schema").style.display = "none";
   document.getElementById("view-ledighet").style.display = "block";
   ledighetTab = "mina";
   ledighetFilterUser = "";
@@ -6053,6 +6056,7 @@ function openTaskDatePicker() {
 async function showSharedSchema() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-schema").style.display = "none";
+  document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-shared-schema").style.display = "block";
   sharedWeekOffset = 0; sharedMonthOffset = 0;
   sharedAllProfiles = await fetchProfiles();
@@ -6449,6 +6453,8 @@ async function renderTodayWidget(user) {
     ,
     lagerTilldeladeRes,
     snoozeRes,
+    pendingLedighetRes,
+    unseenLedighetSvarRes,
   ] = await Promise.all([
     loadFranvaroCache(),
     sb.from("tilldelade_uppgifter").select("*").eq("target_user_id", user.id).eq("is_done", false).order("deadline", { ascending: true }),
@@ -6462,6 +6468,8 @@ async function renderTodayWidget(user) {
       .eq("ar", new Date().getFullYear()).eq("manad", new Date().getMonth() + 1)
       .eq("tilldelad_till", user.id).eq("klar", false),
     sb.from("notis_snooze").select("*").eq("user_id", user.id),
+    isChefUser ? sb.from("ledighetsansokan").select("id").eq("status", "vantar") : Promise.resolve({ data: [] }),
+    sb.from("ledighetsansokan").select("*").eq("user_id", user.id).eq("svar_sedd", false),
   ]);
 
   notisSnoozeMap = {};
@@ -6471,6 +6479,8 @@ async function renderTodayWidget(user) {
 
   const myPinnedTasks = pinnedTasksRes.data;
   const myTilldeladeLagerposter = lagerTilldeladeRes.data || [];
+  const pendingLedighet = pendingLedighetRes.data || [];
+  const unseenLedighetSvar = unseenLedighetSvarRes.data || [];
   const { dagStjarna, veckaStjarna } = stjarnor;
   lastPendingFriskanmalningar = pendingFriskanmalningar;
   lastPendingOnskemal = pendingOnskemal;
@@ -6495,6 +6505,22 @@ async function renderTodayWidget(user) {
      om det blir fler än 5, samla dem bakom en enda rad. */
   const noticeBlocks = [];
 
+  if (pendingLedighet.length && !isNotisSnoozed("ledighet-pending")) {
+    noticeBlocks.push(`
+      <div onclick="goToLedighetAlla()" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+        <span style="flex:1;">🏖️ ${pendingLedighet.length} ledighetsansökning${pendingLedighet.length === 1 ? "" : "ar"} väntar — tryck för att svara</span>
+        ${notisMuteButtonHtml("ledighet-pending")}
+      </div>
+    `);
+  }
+  if (unseenLedighetSvar.length && !isNotisSnoozed("ledighet-svar-unseen")) {
+    noticeBlocks.push(`
+      <div onclick="showLedighet()" style="cursor:pointer; background:var(--green-100); border:1px solid var(--green-300); border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
+        <span style="flex:1;">✅ Chefen har svarat på ${unseenLedighetSvar.length === 1 ? "din ledighetsansökan" : `${unseenLedighetSvar.length} ledighetsansökningar`} — tryck för att se</span>
+        ${notisMuteButtonHtml("ledighet-svar-unseen")}
+      </div>
+    `);
+  }
   if (pendingOnskemal.length && !isNotisSnoozed("onskemal-pending")) {
     noticeBlocks.push(`
       <div onclick="openOnskemalModal(lastPendingOnskemal, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
