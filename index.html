@@ -49,12 +49,12 @@
   }
   /* Datoranpassning — bredare arbetsyta på större skärmar, telefon-layouten
      rörs inte alls under 768px bred skärm. */
-  @media (min-width: 768px) {
+  @media (min-width: 640px) {
     body { display: flex; justify-content: center; }
     .app { max-width: 820px; box-shadow: 0 0 60px rgba(11,61,46,0.12); min-height: 100vh; }
     .btn-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
   }
-  @media (min-width: 1200px) {
+  @media (min-width: 1000px) {
     .app { max-width: 1040px; }
   }
   .app::before, .app::after {
@@ -489,6 +489,8 @@
 
         <div id="nav-card-lager"></div>
 
+        <div id="nav-card-kvalitet"></div>
+
         <div id="nav-card-users"></div>
 
         <div class="nav-card" onclick="showFranvaro()">
@@ -700,6 +702,17 @@
       <div class="title">Lager</div>
     </div>
     <div class="kassa-content" id="lager-results"></div>
+  </div>
+
+  <!-- KVALITE VIEW -->
+  <div id="view-kvalitet" style="display:none;">
+    <div class="topbar with-back">
+      <button class="back-btn" id="kvalitet-back-btn" onclick="showHome()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="title">Kvalité</div>
+    </div>
+    <div class="kassa-content" id="kvalitet-results"></div>
   </div>
 
 </div>
@@ -990,6 +1003,7 @@ async function logout() {
   document.getElementById("view-snabblankar").style.display = "none";
   document.getElementById("view-kampanj").style.display = "none";
   document.getElementById("view-lager").style.display = "none";
+  document.getElementById("view-kvalitet").style.display = "none";
   document.getElementById("view-login").style.display = "block";
   await renderLoginScreen();
 }
@@ -1158,6 +1172,19 @@ async function renderHomeForUser(user) {
         </div>
         <div class="nav-label">Lager</div>
         <div class="nav-sub">${lagerCount > 0 ? `${lagerCount} avvikelse${lagerCount === 1 ? "" : "r"}` : "Inga avvikelser"}</div>
+      </div>
+    `;
+  }
+
+  const kvalitetCardWrap = document.getElementById("nav-card-kvalitet");
+  if (kvalitetCardWrap) {
+    kvalitetCardWrap.innerHTML = `
+      <div class="nav-card" onclick="showKvalitet()">
+        <div class="nav-icon nav-icon-c1">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2L14.5 8.5L21 9.5L16.5 14L17.5 20.5L12 17.5L6.5 20.5L7.5 14L3 9.5L9.5 8.5L12 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="nav-label">Kvalité</div>
+        <div class="nav-sub">LMA-checklista</div>
       </div>
     `;
   }
@@ -2010,6 +2037,7 @@ async function showHome() {
   document.getElementById("view-snabblankar").style.display = "none";
   document.getElementById("view-kampanj").style.display = "none";
   document.getElementById("view-lager").style.display = "none";
+  document.getElementById("view-kvalitet").style.display = "none";
   document.getElementById("view-home").style.display = "block";
   window.scrollTo(0, 0);
   const user = getCurrentUser();
@@ -4436,6 +4464,276 @@ async function saveLagerChecklistaTilldelning(ids) {
   await loadLagerChecklista(lagerChecklistaAr, lagerChecklistaManad);
   const allaKlara = lagerChecklistaCache.length > 0 && lagerChecklistaCache.every(p => p.klar);
   renderLagerChecklistaPoster(allaKlara);
+}
+
+/* ---- Kvalité — LMA-checklista (Kom ihåg-lista LMA v7.0). En lista
+   per ÅR, med en bockningsbar ruta per aktivitet och månad —
+   eftersom aktiviteterna har helt olika frekvens (dagligen till vart
+   tredje år) blir frekvensen bara en informationstext; man bockar av
+   enligt eget omdöme, precis som på pappersblanketten. */
+const KVALITET_AKTIVITETER = [
+  { namn: "Kundrunda", beskrivning: "Apoteksmailen och intranätet bevakas flera gånger per dag. Temperaturen i Oscar kontrolleras dagligen, temperaturlarm hanteras omgående. Beställningsetiketter på KR-tavlan och röda klädnypor kontrolleras varje dag.", frekvens: "Dagligen", fetstil: false },
+  { namn: "Öronhåltagning städning", beskrivning: "Städning görs enligt rutin efter varje håltagningskund. Om inga håltagningskunder, städa ändå minst en gång per vecka. Dokumenteras på avsedd blankett.", frekvens: "Dagligen", fetstil: false },
+  { namn: "Felexpeditioner", beskrivning: "Inkomna ärenden bevakas och utreds inom 14 dagar.", frekvens: "Veckovis", fetstil: true },
+  { namn: "Antibiotika veckostädning", beskrivning: "Veckostädning genomförs och dokumenteras varje vecka.", frekvens: "Veckovis", fetstil: false },
+  { namn: "Ej avhämtade kundreservationer/dosrullar", beskrivning: "Ej avhämtade ärenden hanteras och påminnelser skickas enligt instruktion. Beställningar på KR-listan Övrigt kontrolleras också.", frekvens: "Veckovis", fetstil: false },
+  { namn: "Ej avhämtade e-handelspåsar och distansorder", beskrivning: "Ej avhämtade ordrar plockas bort efter 14 dagar och hanteras enligt rutin.", frekvens: "Varannan vecka", fetstil: false },
+  { namn: "Kvalitetspunkt på månadsmöte", beskrivning: "Förmedla kvalitetsinformation till kollegor på månadsmöte och dokumentera på avsedd blankett.", frekvens: "Månadsvis", fetstil: true },
+  { namn: "Incidenter", beskrivning: "Bevakas och utreds inom 30 dagar.", frekvens: "Månadsvis", fetstil: true },
+  { namn: "Kontroll av recept inlagda i NLL", beskrivning: "Följ upp minst en gång i månaden att alla recept är kontrollerade enligt instruktion. Vid avvikelse ska incident/felexpedition rapporteras.", frekvens: "Månadsvis", fetstil: true },
+  { namn: "Narkotikainventering", beskrivning: "Inventering genomförd varje månad, ev. avvikelser utredda och registrerade i In Control som incidenter. Signerad av ansvarig, AC och LMA.", frekvens: "Månadsvis", fetstil: true },
+  { namn: "Kontroll av narkotika pappersrecept/rekvisition", beskrivning: "Kontroll genomförd och dokumenterad enligt instruktion, minst en gång per månad. Vid avvikelse ska incident rapporteras.", frekvens: "Månadsvis", fetstil: false },
+  { namn: "Temperaturuppföljning", beskrivning: "Kontroll i Oscar Templog gjord och dokumenterad på checklistan för varuansvarig. Avvikelser noterade med åtgärd och incidentnummer.", frekvens: "Månadsvis", fetstil: false },
+  { namn: "Logguppföljning personuppgiftsbehandling", beskrivning: "Logguppföljning genomförd enligt instruktion varje månad, dokumentation finns.", frekvens: "Månadsvis", fetstil: false },
+  { namn: "Behörigheter i PS", beskrivning: "Behörigheter i PS utskrivna och kontrollerade varje månad.", frekvens: "Månadsvis", fetstil: false },
+  { namn: "Hållbarhetskontroll", beskrivning: "Hållbarhetskontroll genomförd enligt instruktion och dokumenterad på Checklista Varuansvarig aktiviteter per månad.", frekvens: "Månadsvis", fetstil: false },
+  { namn: "Lagersaldo utgångna varor", beskrivning: "Rapport 1014 tas ut en gång i veckan, dokumenteras på Checklista varuansvarig aktiviteter per månad.", frekvens: "Månadsvis", fetstil: false },
+  { namn: "Destruktionskartonger", beskrivning: "Aktiverade destruktionskartonger mottagna av Tamro.", frekvens: "Månadsvis", fetstil: false },
+  { namn: "Tagit del av medarbetare per rutinsläpp", beskrivning: "Påminn medarbetarna om rutinsläpp och följ upp resultatet. Kontrollera korrekt befattning/roller i adressboken samt individuella tillägg.", frekvens: "Kvartalsvis", fetstil: false },
+  { namn: "Kompetensuppföljning", beskrivning: "Alla medarbetare inkl. timmisar genomför kompetensutveckling i LH, AC dokumenterar på blankett i medarbetarpärmen.", frekvens: "Kvartalsvis", fetstil: false },
+  { namn: "Damning", beskrivning: "Damning utförs enligt lokal rutin, dokumentation ska finnas.", frekvens: "Kvartalsvis", fetstil: false },
+  { namn: "Kontroll larmkoder", beskrivning: "Larmkoder inventerade enligt rutin, dokumentation ska finnas.", frekvens: "Kvartalsvis", fetstil: false },
+  { namn: "Fördjupad genomgång", beskrivning: "Analysera och sammanställ avvikelser. Fördjupad genomgång sker minst 2 gånger per år, dokumenteras i LH.", frekvens: "Halvårsvis", fetstil: false },
+  { namn: "Kvalitetssäkring tjänster", beskrivning: "Kompetenssäkring av tjänster görs två gånger per år. Kräver minst sex kunder per halvår, alternativt en godkänd kvalitetskontroll.", frekvens: "Halvårsvis", fetstil: false },
+  { namn: "Egeninspektion", beskrivning: "Egeninspektion genomförs årligen, avvikelser åtgärdas och resultatet delges medarbetare, AC och RC.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Riskanalys livsmedelshantering", beskrivning: "Riskanalys genomförs årligen, gås igenom med medarbetarna. AC ansvarar för att avvikelser åtgärdas.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Granskning lokala rutiner", beskrivning: "Uppdatering/översyn sker vid förändring och/eller egeninspektionen. Granskning dokumenteras på rutinen om ingen uppdatering görs.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Receptprocessen kundfall", beskrivning: "Gås igenom en gång per år med medarbetare i receptprocessen, dokumenteras i LearningHub.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Incidentmätningsvecka", beskrivning: "Påminn medarbetare att delta och registrera incidenter vid central incidentmätningsvecka. Sammanställ resultatet.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Samlyssna på assistent", beskrivning: "Samlyssna i egenvården på rådgivande assistenter, dokumenteras i LH.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Egenkontroll Medicinsk öronhåltagning", beskrivning: "Om tjänsten finns på apoteket: Egeninspektion öronhåltagning genomförs årligen.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Nyckelinventering och byte av kod", beskrivning: "Nyckelinventering görs och kod på säkerhetsskåp m.m. byts minst en gång per år enligt rutin.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Arkivering", beskrivning: "Dokumentation som omfattas av Läkemedelsverkets kontroll förvaras skyddad mot obehöriga, brand och vatten. Skickas till arkivering en gång per år.", frekvens: "Årsvis", fetstil: false },
+  { namn: "Kalibrering av termometrar", beskrivning: "Oscars templogg kalibreras/byts vart 3:e år.", frekvens: "Var 3:e år", fetstil: false },
+];
+
+const KVALITET_VID_BEHOV = [
+  { namn: "Uppdatera lokala rutiner", beskrivning: "Uppdatera lokala rutiner vid behov." },
+  { namn: "Överlämning till ersättare LMA vid planerad ledighet", beskrivning: "Vid planerad ledighet genomför överlämning till ersättare LMA." },
+  { namn: "Ansvarsfördelning", beskrivning: "Följ upp att den uppdateras vid förändringar." },
+  { namn: "Signumlista", beskrivning: "Ska uppdateras vid behov. Tidigare dateras med slutdatum och arkiveras." },
+  { namn: "Introduktion nyanställd/inlån", beskrivning: "Följ upp att introduktion finns, blankett korrekt ifylld, signumlista signerad och dokumentation för lokala rutiner." },
+  { namn: "Reklamationer", beskrivning: "Följ upp att reklamationer hanteras skyndsamt och dokumenteras enligt rutin." },
+  { namn: "Indragningar", beskrivning: "Följ upp att indragningar hanteras skyndsamt och dokumenteras enligt rutin." },
+  { namn: "Antibiotika spädning", beskrivning: "Följ upp att spädning dokumenteras enligt rutin." },
+  { namn: "Tystnadsplikt", beskrivning: "Följ upp att tystnadspliktsavtal skrivs med besökare och uppdragsgivare." },
+];
+
+let kvalitetAr = null;
+let kvalitetManad = null;
+let kvalitetView = "aktuell"; // "aktuell" | "tidigare" | "vidbehov"
+let kvalitetCache = [];
+let kvalitetAllaProfiler = [];
+
+async function showKvalitet() {
+  document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-kvalitet").style.display = "block";
+  const now = new Date();
+  kvalitetAr = now.getFullYear();
+  kvalitetManad = now.getMonth() + 1;
+  kvalitetView = "aktuell";
+  const [, profiler] = await Promise.all([
+    ensureKvalitetChecklistaFinns(kvalitetAr),
+    fetchProfiles(),
+  ]);
+  kvalitetAllaProfiler = profiler;
+  await loadKvalitetManad(kvalitetAr, kvalitetManad);
+  renderKvalitetView();
+}
+
+async function ensureKvalitetChecklistaFinns(ar) {
+  const forvantatAntal = KVALITET_AKTIVITETER.length * 12;
+  const { data: befintliga } = await sb.from("kvalitet_checklista").select("id, aktivitet, frekvens, beskrivning").eq("ar", ar);
+  const rows = befintliga || [];
+  const saknarInfo = KVALITET_AKTIVITETER.some(a => rows.some(r => r.aktivitet === a.namn && (!r.frekvens || !r.beskrivning)));
+  if (rows.length === forvantatAntal && !saknarInfo) return; // redan i perfekt skick
+
+  const nyaRader = [];
+  KVALITET_AKTIVITETER.forEach(a => {
+    for (let m = 1; m <= 12; m++) {
+      nyaRader.push({ ar, manad: m, aktivitet: a.namn, beskrivning: a.beskrivning, frekvens: a.frekvens, fetstil: a.fetstil });
+    }
+  });
+  await sb.from("kvalitet_checklista").upsert(nyaRader, { onConflict: "ar,manad,aktivitet", ignoreDuplicates: true });
+
+  await Promise.all(
+    KVALITET_AKTIVITETER.map(a =>
+      sb.from("kvalitet_checklista").update({ beskrivning: a.beskrivning, frekvens: a.frekvens, fetstil: a.fetstil })
+        .eq("ar", ar).eq("aktivitet", a.namn)
+    )
+  );
+}
+
+async function loadKvalitetManad(ar, manad) {
+  const { data, error } = await sb.from("kvalitet_checklista").select("*").eq("ar", ar).eq("manad", manad);
+  kvalitetCache = error ? [] : data;
+  kvalitetCache.sort((a, b) =>
+    KVALITET_AKTIVITETER.findIndex(x => x.namn === a.aktivitet) - KVALITET_AKTIVITETER.findIndex(x => x.namn === b.aktivitet)
+  );
+}
+
+function setKvalitetView(view) {
+  kvalitetView = view;
+  if (view === "aktuell") {
+    const now = new Date();
+    kvalitetAr = now.getFullYear();
+    kvalitetManad = now.getMonth() + 1;
+    loadKvalitetManad(kvalitetAr, kvalitetManad).then(renderKvalitetView);
+    return;
+  }
+  renderKvalitetView();
+}
+
+function renderKvalitetView() {
+  const container = document.getElementById("kvalitet-results");
+  container.innerHTML = `
+    <div class="view-toggle">
+      <button id="kvalitet-tab-aktuell" onclick="setKvalitetView('aktuell')">${LAGER_MANADSNAMN[new Date().getMonth() + 1]}</button>
+      <button id="kvalitet-tab-tidigare" onclick="setKvalitetView('tidigare')">Tidigare månader</button>
+      <button id="kvalitet-tab-vidbehov" onclick="setKvalitetView('vidbehov')">Vid behov</button>
+    </div>
+    <div id="kvalitet-content"></div>
+  `;
+  document.getElementById(`kvalitet-tab-${kvalitetView}`).classList.add("active");
+
+  if (kvalitetView === "tidigare") renderKvalitetTidigareLista();
+  else if (kvalitetView === "vidbehov") renderKvalitetVidBehov();
+  else renderKvalitetPoster();
+}
+
+function renderKvalitetPoster() {
+  const contentWrap = document.getElementById("kvalitet-content");
+  const antalKlara = kvalitetCache.filter(p => p.klar).length;
+  const allaKlara = kvalitetCache.length > 0 && antalKlara === kvalitetCache.length;
+  contentWrap.innerHTML = `
+    <div class="kassa-section-title" style="margin-top:14px;">${LAGER_MANADSNAMN[kvalitetManad]} ${kvalitetAr}</div>
+    <div style="background:${allaKlara ? "var(--green-100)" : "#fff8f0"}; border:1px solid ${allaKlara ? "var(--green-300)" : "#f3d9b9"}; border-radius:14px; padding:12px 14px; margin:8px 0 14px; text-align:center; font-weight:700; color:${allaKlara ? "var(--green-700)" : "#b5590a"};">
+      ${allaKlara ? "✅ Allt ifyllt denna månad" : `⏳ ${antalKlara} av ${kvalitetCache.length} klara`}
+    </div>
+    <div id="kvalitet-poster-list"></div>
+  `;
+  document.getElementById("kvalitet-poster-list").innerHTML = kvalitetPosterHtml(true);
+}
+
+function kvalitetPosterHtml(interaktiv) {
+  return kvalitetCache.map(p => {
+    const tilldelad = kvalitetAllaProfiler.find(u => u.id === p.tilldelad_till);
+    return `
+      <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; ${p.klar ? "background:var(--green-050);" : ""}">
+        <div style="display:flex; align-items:flex-start; gap:8px;">
+          ${interaktiv ? `<input type="checkbox" ${p.klar ? "checked" : ""} onchange="toggleKvalitetKlar('${p.id}', this.checked)" style="margin-top:2px;">` : `<span style="margin-top:1px;">${p.klar ? "✅" : "⬜"}</span>`}
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:${p.fetstil ? "800" : "700"}; font-size:13px;">${p.aktivitet}${p.fetstil ? ` <span style="font-size:10px; color:#b5590a; font-weight:700;">LMA</span>` : ""}</div>
+            <div style="font-size:10.5px; color:var(--green-700); font-weight:700; margin-top:2px;">${p.frekvens}</div>
+            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${p.beskrivning}</div>
+            <div style="font-size:11px; margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">
+              <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv ? ` <a href="#" onclick='event.preventDefault(); openKvalitetTilldela("${p.id}")' style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
+              ${p.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function toggleKvalitetKlar(id, checked) {
+  const user = getCurrentUser();
+  const patch = checked
+    ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
+    : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null };
+  const { error } = await sb.from("kvalitet_checklista").update(patch).eq("id", id);
+  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
+  await loadKvalitetManad(kvalitetAr, kvalitetManad);
+  renderKvalitetPoster();
+}
+
+function openKvalitetTilldela(id) {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "kvalitet-tilldela-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Tilldela aktivitet</div>
+      <div class="field-group">
+        <select class="field-input" id="kvalitet-tilldela-select">
+          <option value="">Ingen</option>
+          ${kvalitetAllaProfiler.map(u => `<option value="${u.id}">${u.name}</option>`).join("")}
+        </select>
+      </div>
+      <button class="btn-primary" onclick="saveKvalitetTilldelning('${id}')">Spara</button>
+      <button class="btn-secondary" onclick="document.getElementById('kvalitet-tilldela-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function saveKvalitetTilldelning(id) {
+  const val = document.getElementById("kvalitet-tilldela-select").value || null;
+  const { error } = await sb.from("kvalitet_checklista").update({ tilldelad_till: val }).eq("id", id);
+  if (error) { alert("Kunde inte spara: " + error.message); return; }
+  const overlay = document.getElementById("kvalitet-tilldela-overlay");
+  if (overlay) overlay.remove();
+  await loadKvalitetManad(kvalitetAr, kvalitetManad);
+  renderKvalitetPoster();
+}
+
+async function renderKvalitetTidigareLista() {
+  const contentWrap = document.getElementById("kvalitet-content");
+  const now = new Date();
+  const thisAr = now.getFullYear(), thisManad = now.getMonth() + 1;
+  const { data } = await sb.from("kvalitet_checklista").select("ar, manad, klar").order("ar", { ascending: false }).order("manad", { ascending: false });
+  const grupper = {};
+  (data || []).forEach(r => {
+    if (r.ar === thisAr && r.manad === thisManad) return;
+    const key = `${r.ar}-${r.manad}`;
+    if (!grupper[key]) grupper[key] = { ar: r.ar, manad: r.manad, total: 0, klara: 0 };
+    grupper[key].total++;
+    if (r.klar) grupper[key].klara++;
+  });
+  const unika = Object.values(grupper).sort((a, b) => b.ar - a.ar || b.manad - a.manad);
+  contentWrap.innerHTML = unika.length
+    ? `<div class="kassa-row-list" style="margin-top:14px;">${unika.map(m => {
+        const klart = m.total > 0 && m.klara === m.total;
+        return `
+        <div class="kassa-row" onclick="openKvalitetTidigareMonad(${m.ar}, ${m.manad})">
+          <div style="flex:1;">${LAGER_MANADSNAMN[m.manad]} ${m.ar}</div>
+          <span class="org-badge" style="background:${klart ? "var(--green-100)" : "#fde3c8"}; color:${klart ? "var(--green-700)" : "#b5590a"};">${klart ? "✅ Klar" : `${m.klara}/${m.total}`}</span>
+        </div>
+      `;
+      }).join("")}</div>`
+    : `<div class="empty-state">Inga tidigare månader ännu.</div>`;
+}
+
+async function openKvalitetTidigareMonad(ar, manad) {
+  await loadKvalitetManad(ar, manad);
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "kvalitet-manad-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card" style="max-width:420px;">
+      <div class="kassa-modal-title">${LAGER_MANADSNAMN[manad]} ${ar}</div>
+      <div id="kvalitet-manad-poster"></div>
+      <button class="btn-secondary" onclick="document.getElementById('kvalitet-manad-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById("kvalitet-manad-poster").innerHTML = kvalitetPosterHtml(false);
+}
+
+function renderKvalitetVidBehov() {
+  const contentWrap = document.getElementById("kvalitet-content");
+  contentWrap.innerHTML = `
+    <div style="font-size:11.5px; color:var(--muted); margin:14px 0;">Dessa aktiviteter görs vid behov, inte enligt ett fast schema — därför bockas de inte av per månad. Ren referenslista.</div>
+    ${KVALITET_VID_BEHOV.map(a => `
+      <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px;">
+        <div style="font-weight:700; font-size:13px;">${a.namn}</div>
+        <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${a.beskrivning}</div>
+      </div>
+    `).join("")}
+  `;
 }
 
 async function showKampanj() {
