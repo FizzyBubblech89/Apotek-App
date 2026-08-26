@@ -4161,9 +4161,8 @@ async function openLagerChecklistaTidigareMonad(ar, manad) {
   overlay.innerHTML = `
     <div class="kassa-modal-card" style="max-width:420px;">
       <div class="kassa-modal-title">${LAGER_MANADSNAMN[manad]} ${ar}</div>
-      ${allaKlara
-        ? `<button class="btn-primary" onclick="exportLagerChecklistaPdf(${ar}, ${manad})" style="margin-bottom:14px;">📄 Exportera PDF för utskrift</button>`
-        : `<div style="font-size:11.5px; color:var(--muted); margin-bottom:14px;">Månaden är inte helt ifylld ännu — PDF-export blir tillgänglig när allt är signerat.</div>`}
+      <button class="btn-primary" onclick="exportLagerChecklistaPdf(${ar}, ${manad})" style="margin-bottom:6px;">📄 Exportera PDF för utskrift</button>
+      ${!allaKlara ? `<div style="font-size:11px; color:#b5590a; margin-bottom:14px;">Obs: månaden är inte helt ifylld ännu — PDF:en visar nuvarande status.</div>` : `<div style="margin-bottom:14px;"></div>`}
       <div id="lager-checklista-manad-poster"></div>
       <button class="btn-secondary" onclick="document.getElementById('lager-checklista-manad-overlay').remove()">Stäng</button>
     </div>
@@ -4490,21 +4489,21 @@ const KVALITET_AKTIVITETER = [
   { namn: "Lagersaldo utgångna varor", beskrivning: "Rapport 1014 tas ut en gång i veckan, dokumenteras på Checklista varuansvarig aktiviteter per månad.", frekvens: "Månadsvis", fetstil: false },
   { namn: "Destruktionskartonger", beskrivning: "Aktiverade destruktionskartonger mottagna av Tamro.", frekvens: "Månadsvis", fetstil: false },
   { namn: "Tagit del av medarbetare per rutinsläpp", beskrivning: "Påminn medarbetarna om rutinsläpp och följ upp resultatet. Kontrollera korrekt befattning/roller i adressboken samt individuella tillägg.", frekvens: "Kvartalsvis", fetstil: false, ejAktuellOption: true },
-  { namn: "Kompetensuppföljning", beskrivning: "Alla medarbetare inkl. timmisar genomför kompetensutveckling i LH, AC dokumenterar på blankett i medarbetarpärmen.", frekvens: "Kvartalsvis", fetstil: false },
-  { namn: "Damning", beskrivning: "Damning utförs enligt lokal rutin, dokumentation ska finnas.", frekvens: "Kvartalsvis", fetstil: false },
-  { namn: "Kontroll larmkoder", beskrivning: "Larmkoder inventerade enligt rutin, dokumentation ska finnas.", frekvens: "Kvartalsvis", fetstil: false },
-  { namn: "Fördjupad genomgång", beskrivning: "Analysera och sammanställ avvikelser. Fördjupad genomgång sker minst 2 gånger per år, dokumenteras i LH.", frekvens: "Halvårsvis", fetstil: false },
-  { namn: "Kvalitetssäkring tjänster", beskrivning: "Kompetenssäkring av tjänster görs två gånger per år. Kräver minst sex kunder per halvår, alternativt en godkänd kvalitetskontroll.", frekvens: "Halvårsvis", fetstil: false },
-  { namn: "Egeninspektion", beskrivning: "Egeninspektion genomförs årligen, avvikelser åtgärdas och resultatet delges medarbetare, AC och RC.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Riskanalys livsmedelshantering", beskrivning: "Riskanalys genomförs årligen, gås igenom med medarbetarna. AC ansvarar för att avvikelser åtgärdas.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Granskning lokala rutiner", beskrivning: "Uppdatering/översyn sker vid förändring och/eller egeninspektionen. Granskning dokumenteras på rutinen om ingen uppdatering görs.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Receptprocessen kundfall", beskrivning: "Gås igenom en gång per år med medarbetare i receptprocessen, dokumenteras i LearningHub.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Incidentmätningsvecka", beskrivning: "Påminn medarbetare att delta och registrera incidenter vid central incidentmätningsvecka. Sammanställ resultatet.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Samlyssna på assistent", beskrivning: "Samlyssna i egenvården på rådgivande assistenter, dokumenteras i LH.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Egenkontroll Medicinsk öronhåltagning", beskrivning: "Om tjänsten finns på apoteket: Egeninspektion öronhåltagning genomförs årligen.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Nyckelinventering och byte av kod", beskrivning: "Nyckelinventering görs och kod på säkerhetsskåp m.m. byts minst en gång per år enligt rutin.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Arkivering", beskrivning: "Dokumentation som omfattas av Läkemedelsverkets kontroll förvaras skyddad mot obehöriga, brand och vatten. Skickas till arkivering en gång per år.", frekvens: "Årsvis", fetstil: false },
-  { namn: "Kalibrering av termometrar", beskrivning: "Oscars templogg kalibreras/byts vart 3:e år.", frekvens: "Var 3:e år", fetstil: false },
+  { namn: "Kompetensuppföljning", beskrivning: "Alla medarbetare inkl. timmisar genomför kompetensutveckling i LH, AC dokumenterar på blankett i medarbetarpärmen.", frekvens: "Kvartalsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Damning", beskrivning: "Damning utförs enligt lokal rutin, dokumentation ska finnas.", frekvens: "Kvartalsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Kontroll larmkoder", beskrivning: "Larmkoder inventerade enligt rutin, dokumentation ska finnas.", frekvens: "Kvartalsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Fördjupad genomgång", beskrivning: "Analysera och sammanställ avvikelser. Fördjupad genomgång sker minst 2 gånger per år, dokumenteras i LH.", frekvens: "Halvårsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Kvalitetssäkring tjänster", beskrivning: "Kompetenssäkring av tjänster görs två gånger per år. Kräver minst sex kunder per halvår, alternativt en godkänd kvalitetskontroll.", frekvens: "Halvårsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Egeninspektion", beskrivning: "Egeninspektion genomförs årligen, avvikelser åtgärdas och resultatet delges medarbetare, AC och RC.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Riskanalys livsmedelshantering", beskrivning: "Riskanalys genomförs årligen, gås igenom med medarbetarna. AC ansvarar för att avvikelser åtgärdas.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Granskning lokala rutiner", beskrivning: "Uppdatering/översyn sker vid förändring och/eller egeninspektionen. Granskning dokumenteras på rutinen om ingen uppdatering görs.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Receptprocessen kundfall", beskrivning: "Gås igenom en gång per år med medarbetare i receptprocessen, dokumenteras i LearningHub.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Incidentmätningsvecka", beskrivning: "Påminn medarbetare att delta och registrera incidenter vid central incidentmätningsvecka. Sammanställ resultatet.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Samlyssna på assistent", beskrivning: "Samlyssna i egenvården på rådgivande assistenter, dokumenteras i LH.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Egenkontroll Medicinsk öronhåltagning", beskrivning: "Om tjänsten finns på apoteket: Egeninspektion öronhåltagning genomförs årligen.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Nyckelinventering och byte av kod", beskrivning: "Nyckelinventering görs och kod på säkerhetsskåp m.m. byts minst en gång per år enligt rutin.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Arkivering", beskrivning: "Dokumentation som omfattas av Läkemedelsverkets kontroll förvaras skyddad mot obehöriga, brand och vatten. Skickas till arkivering en gång per år.", frekvens: "Årsvis", fetstil: false, ejAktuellOption: true },
+  { namn: "Kalibrering av termometrar", beskrivning: "Oscars templogg kalibreras/byts vart 3:e år.", frekvens: "Var 3:e år", fetstil: false, ejAktuellOption: true },
 ];
 
 const KVALITET_VID_BEHOV = [
@@ -4737,9 +4736,8 @@ async function openKvalitetTidigareMonad(ar, manad) {
   overlay.innerHTML = `
     <div class="kassa-modal-card" style="max-width:420px;">
       <div class="kassa-modal-title">${LAGER_MANADSNAMN[manad]} ${ar}</div>
-      ${allaKlara
-        ? `<button class="btn-primary" onclick="exportKvalitetPdf(${ar}, ${manad})" style="margin-bottom:14px;">📄 Exportera PDF för utskrift</button>`
-        : `<div style="font-size:11.5px; color:var(--muted); margin-bottom:14px;">Månaden är inte helt ifylld ännu — PDF-export blir tillgänglig när allt är signerat eller markerat ej aktuellt.</div>`}
+      <button class="btn-primary" onclick="exportKvalitetPdf(${ar}, ${manad})" style="margin-bottom:6px;">📄 Exportera PDF för utskrift</button>
+      ${!allaKlara ? `<div style="font-size:11px; color:#b5590a; margin-bottom:14px;">Obs: månaden är inte helt ifylld ännu — PDF:en visar nuvarande status.</div>` : `<div style="margin-bottom:14px;"></div>`}
       <div id="kvalitet-manad-poster"></div>
       <button class="btn-secondary" onclick="document.getElementById('kvalitet-manad-overlay').remove()">Stäng</button>
     </div>
