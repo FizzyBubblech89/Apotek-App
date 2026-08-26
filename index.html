@@ -517,6 +517,7 @@
       <div class="view-toggle" style="margin-bottom:10px;">
         <button class="active" disabled>Individuellt</button>
         <button onclick="showSharedSchema()">Gemensamt</button>
+        <button onclick="showLedighet()">Ledighetsansökan</button>
       </div>
       <div class="view-toggle">
         <button id="toggle-week" onclick="setViewMode('week')">Vecka</button>
@@ -600,6 +601,7 @@
       <div class="view-toggle" style="margin-bottom:10px;">
         <button onclick="showSchema()">Individuellt</button>
         <button class="active" disabled>Gemensamt</button>
+        <button onclick="showLedighet()">Ledighetsansökan</button>
       </div>
       <div class="view-toggle">
         <button id="shared-toggle-week" onclick="setSharedViewMode('week')">Vecka</button>
@@ -713,6 +715,24 @@
       <div class="title">Kvalité</div>
     </div>
     <div class="kassa-content" id="kvalitet-results"></div>
+  </div>
+
+  <!-- LEDIGHETSANSÖKAN VIEW -->
+  <div id="view-ledighet" style="display:none;">
+    <div class="topbar with-back">
+      <button class="back-btn" onclick="showHome()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="title">Schema</div>
+    </div>
+    <div class="schema-content">
+      <div class="view-toggle" style="margin-bottom:10px;">
+        <button onclick="showSchema()">Individuellt</button>
+        <button onclick="showSharedSchema()">Gemensamt</button>
+        <button class="active" disabled>Ledighetsansökan</button>
+      </div>
+      <div id="ledighet-results"></div>
+    </div>
   </div>
 
 </div>
@@ -1004,6 +1024,7 @@ async function logout() {
   document.getElementById("view-kampanj").style.display = "none";
   document.getElementById("view-lager").style.display = "none";
   document.getElementById("view-kvalitet").style.display = "none";
+  document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-login").style.display = "block";
   await renderLoginScreen();
 }
@@ -1188,6 +1209,7 @@ async function renderHomeForUser(user) {
       </div>
     `;
   }
+
 }
 
 const UTBILDNINGAR = ["Farmacevt (apotekare)", "Farmacevt (receptarie)", "Apotekstekniker", "Apoteksassistent"];
@@ -2038,6 +2060,7 @@ async function showHome() {
   document.getElementById("view-kampanj").style.display = "none";
   document.getElementById("view-lager").style.display = "none";
   document.getElementById("view-kvalitet").style.display = "none";
+  document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-home").style.display = "block";
   window.scrollTo(0, 0);
   const user = getCurrentUser();
@@ -4896,6 +4919,216 @@ async function submitVidBehovKommentar(aktivitetNamn) {
   await renderVidBehovKommentarList(aktivitetNamn);
 }
 
+/* ---- Ledighetsansökan ---- */
+const LEDIGHET_STATUS_LABEL = { vantar: "Väntar", beviljad: "Beviljat", nekad: "Nekat", nytt_forslag: "Nytt förslag" };
+let ledighetTab = "mina";
+let ledighetCache = [];
+let ledighetAllaProfiler = [];
+let ledighetFilterUser = "";
+let ledighetDraft = { franDatum: "", tillDatum: "", kommentar: "" };
+
+async function showLedighet() {
+  document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-ledighet").style.display = "block";
+  ledighetTab = "mina";
+  ledighetFilterUser = "";
+  if (isChef()) ledighetAllaProfiler = await fetchProfiles();
+  await loadLedighet();
+  renderLedighetView();
+}
+
+async function goToLedighetAlla() {
+  await showLedighet();
+  setLedighetTab("alla");
+}
+
+async function loadLedighet() {
+  const user = getCurrentUser();
+  let query = sb.from("ledighetsansokan").select("*").order("fran_datum", { ascending: false });
+  if (ledighetTab === "mina") {
+    query = query.eq("user_id", user.id);
+  } else if (ledighetFilterUser) {
+    query = query.eq("user_id", ledighetFilterUser);
+  }
+  const { data, error } = await query;
+  ledighetCache = error ? [] : data;
+
+  if (ledighetTab === "mina") {
+    const osedda = ledighetCache.filter(a => a.status !== "vantar" && !a.svar_sedd);
+    if (osedda.length) {
+      await Promise.all(osedda.map(a => sb.from("ledighetsansokan").update({ svar_sedd: true }).eq("id", a.id)));
+      osedda.forEach(a => { a.svar_sedd = true; });
+    }
+  }
+}
+
+function setLedighetTab(tab) {
+  ledighetTab = tab;
+  loadLedighet().then(renderLedighetView);
+}
+
+function setLedighetFilter(userId) {
+  ledighetFilterUser = userId;
+  loadLedighet().then(renderLedighetList);
+}
+
+function renderLedighetView() {
+  const container = document.getElementById("ledighet-results");
+  container.innerHTML = `
+    <button class="btn-primary" onclick="openNewLedighetModal()">+ Ansök om ledighet</button>
+    <div class="view-toggle" style="margin-top:16px;">
+      <button id="ledighet-tab-mina" onclick="setLedighetTab('mina')">Mina ansökningar</button>
+      ${isChef() ? `<button id="ledighet-tab-alla" onclick="setLedighetTab('alla')">Alla medarbetare</button>` : ""}
+    </div>
+    ${ledighetTab === "alla" && isChef() ? `
+      <div class="field-group" style="margin-top:12px;">
+        <label class="field-label">Sortera på medarbetare</label>
+        <select class="field-input" id="ledighet-filter-select" onchange="setLedighetFilter(this.value)">
+          <option value="">Alla medarbetare</option>
+          ${ledighetAllaProfiler.map(u => `<option value="${u.id}" ${ledighetFilterUser === u.id ? "selected" : ""}>${u.name}</option>`).join("")}
+        </select>
+      </div>
+    ` : ""}
+    <div id="ledighet-list" style="margin-top:14px;"></div>
+  `;
+  document.getElementById(`ledighet-tab-${ledighetTab}`).classList.add("active");
+  renderLedighetList();
+}
+
+function renderLedighetList() {
+  const wrap = document.getElementById("ledighet-list");
+  if (!wrap) return;
+  const visaMedarbetare = ledighetTab === "alla";
+  const user = getCurrentUser();
+  wrap.innerHTML = ledighetCache.length
+    ? `<div class="kassa-row-list">${ledighetCache.map(a => {
+        const person = ledighetAllaProfiler.find(u => u.id === a.user_id);
+        const klickbar = isChef() && a.status === "vantar";
+        return `
+        <div class="kassa-row" style="align-items:flex-start; cursor:${klickbar ? "pointer" : "default"};" ${klickbar ? `onclick="openLedighetSvarModal('${a.id}')"` : ""}>
+          <div style="flex:1; min-width:0;">
+            ${visaMedarbetare ? `<div style="font-weight:700; font-size:12.5px;">${person ? person.name : a.signum}</div>` : ""}
+            <div style="font-size:12.5px; font-weight:700;">${fmtSvShort(a.fran_datum)} – ${fmtSvShort(a.till_datum)}</div>
+            ${a.kommentar ? `<div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${a.kommentar}</div>` : ""}
+            <div style="margin-top:4px;">
+              <span class="org-badge" style="background:${a.status === "beviljad" ? "var(--green-100)" : a.status === "nekad" ? "#fdecec" : a.status === "nytt_forslag" ? "var(--line)" : "#fff3d6"}; color:${a.status === "beviljad" ? "var(--green-700)" : a.status === "nekad" ? "#b3261e" : a.status === "nytt_forslag" ? "var(--ink)" : "#b5590a"};">${LEDIGHET_STATUS_LABEL[a.status]}</span>
+            </div>
+            ${a.svar_text ? `<div style="font-size:12px; margin-top:4px;">${a.svar_text}</div>` : ""}
+          </div>
+          ${(a.user_id === user.id && a.status === "vantar") || isChef() ? `<button class="kr-delete" onclick="event.stopPropagation(); deleteLedighet('${a.id}')" aria-label="Ta bort">✕</button>` : ""}
+        </div>
+      `;
+      }).join("")}</div>`
+    : `<div class="empty-state">Inga ansökningar ${ledighetTab === "mina" ? "ännu" : "att visa"}.</div>`;
+}
+
+function openNewLedighetModal() {
+  ledighetDraft = { franDatum: isoDate(new Date()), tillDatum: isoDate(new Date()), kommentar: "" };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "ledighet-new-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Ansök om ledighet</div>
+      <div class="field-group">
+        <label class="field-label">Från datum</label>
+        <button type="button" class="field-input kassa-date-btn" id="ledighet-fran-btn" onclick="openLedighetDatePicker('fran')">${fmtSvFull(ledighetDraft.franDatum)}</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Till datum</label>
+        <button type="button" class="field-input kassa-date-btn" id="ledighet-till-btn" onclick="openLedighetDatePicker('till')">${fmtSvFull(ledighetDraft.tillDatum)}</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Kommentar (valfritt)</label>
+        <textarea class="field-input" id="ledighet-kommentar-input" style="min-height:60px;" oninput="ledighetDraft.kommentar = this.value"></textarea>
+      </div>
+      <div id="ledighet-new-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:8px 0;"></div>
+      <button class="btn-primary" onclick="submitLedighet()">Skicka ansökan</button>
+      <button class="btn-secondary" onclick="document.getElementById('ledighet-new-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function openLedighetDatePicker(which) {
+  openGenericDatePicker(
+    () => which === "fran" ? ledighetDraft.franDatum : ledighetDraft.tillDatum,
+    (iso) => {
+      if (which === "fran") ledighetDraft.franDatum = iso; else ledighetDraft.tillDatum = iso;
+      const btn = document.getElementById(`ledighet-${which}-btn`);
+      if (btn) btn.textContent = fmtSvFull(iso);
+    }
+  );
+}
+
+async function submitLedighet() {
+  const errorBox = document.getElementById("ledighet-new-error");
+  if (ledighetDraft.tillDatum < ledighetDraft.franDatum) { errorBox.textContent = "Till-datum måste vara efter från-datum."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Skickar…";
+  const { error } = await sb.from("ledighetsansokan").insert({
+    user_id: user.id, signum: user.signum, fran_datum: ledighetDraft.franDatum, till_datum: ledighetDraft.tillDatum, kommentar: ledighetDraft.kommentar,
+  });
+  if (error) { errorBox.textContent = "Kunde inte skicka: " + error.message; return; }
+  const overlay = document.getElementById("ledighet-new-overlay");
+  if (overlay) overlay.remove();
+  await loadLedighet();
+  renderLedighetList();
+}
+
+function openLedighetSvarModal(id) {
+  const a = ledighetCache.find(x => x.id === id);
+  if (!a) return;
+  const person = ledighetAllaProfiler.find(u => u.id === a.user_id);
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "ledighet-svar-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${person ? person.name : a.signum}</div>
+      <div class="kassa-modal-note" style="margin-top:0;">${fmtSvShort(a.fran_datum)} – ${fmtSvShort(a.till_datum)}</div>
+      ${a.kommentar ? `<div style="font-size:12.5px; margin:8px 0;">${a.kommentar}</div>` : ""}
+      <div class="field-group">
+        <label class="field-label">Svar (valfritt)</label>
+        <textarea class="field-input" id="ledighet-svar-text" style="min-height:60px;" placeholder="Valfri kommentar till svaret..."></textarea>
+      </div>
+      <button class="btn-primary" onclick="saveLedighetSvar('${id}', 'beviljad')">✔ Bevilja</button>
+      <button class="btn-secondary" onclick="saveLedighetSvar('${id}', 'nekad')">✕ Neka</button>
+      <button class="btn-secondary" onclick="saveLedighetSvar('${id}', 'nytt_forslag')">Föreslå annat</button>
+      <button class="btn-secondary" onclick="document.getElementById('ledighet-svar-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function saveLedighetSvar(id, status) {
+  const svarText = document.getElementById("ledighet-svar-text").value.trim();
+  const user = getCurrentUser();
+  const { error } = await sb.from("ledighetsansokan").update({
+    status, svar_text: svarText, svarad_av: user.id, svarad_signum: user.signum, svarad_at: new Date().toISOString(), svar_sedd: false,
+  }).eq("id", id);
+  if (error) { alert("Kunde inte spara: " + error.message); return; }
+  const overlay = document.getElementById("ledighet-svar-overlay");
+  if (overlay) overlay.remove();
+  await loadLedighet();
+  renderLedighetList();
+}
+
+function deleteLedighet(id) {
+  confirmDelete(
+    "Ta bort ansökan?",
+    "Ledighetsansökan tas bort permanent. Det går inte att ångra.",
+    async () => {
+      const { error } = await sb.from("ledighetsansokan").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadLedighet();
+      renderLedighetList();
+    }
+  );
+}
+
 async function showKampanj() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-kampanj").style.display = "block";
@@ -5872,16 +6105,19 @@ function renderSharedWeek() {
     const iso = isoDate(d);
     const isToday = sameDay(d, today);
     const dayComments = commentsForDay(iso);
-    const rows = profilesWithScheduleOrAbsence(iso).map(({ profile, events }) => {
-      const dayEvents = events.filter(e => sameDay(e.start, d));
-      const c = consolidateDay(dayEvents);
-      const absence = absenceOn(profile.id, iso);
-      let statusHtml;
-      if (absence) statusHtml = `<span style="color:#b3261e; font-weight:700;">Sjuk</span>`;
-      else if (!c) statusHtml = `<span style="color:var(--muted);">–</span>`;
-      else if (c.isOff) statusHtml = `<span style="color:var(--muted);">Ledig</span>`;
-      else statusHtml = `<span style="font-weight:700;">${fmtTime(c.start)}–${fmtTime(c.end)}</span>`;
-      return `
+    const rows = profilesWithScheduleOrAbsence(iso)
+      .map(({ profile, events }) => {
+        const dayEvents = events.filter(e => sameDay(e.start, d));
+        const c = consolidateDay(dayEvents);
+        const absence = absenceOn(profile.id, iso);
+        return { profile, c, absence };
+      })
+      .filter(({ c, absence }) => (c && !c.isOff) || absence) // bara de som faktiskt arbetar (eller är sjukanmälda från ett pass) den här dagen
+      .map(({ profile, c, absence }) => {
+        let statusHtml;
+        if (absence) statusHtml = `<span style="color:#b3261e; font-weight:700;">Sjuk</span>`;
+        else statusHtml = `<span style="font-weight:700;">${fmtTime(c.start)}–${fmtTime(c.end)}</span>`;
+        return `
         <div class="kassa-row" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
           <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
             ${avatarHtml(profile, 24, !!absence)}
@@ -5898,7 +6134,7 @@ function renderSharedWeek() {
         <span style="font-weight:400; text-transform:none; color:var(--green-700);">${dayComments.length ? `💬 ${dayComments.length}` : "+ Kommentar"}</span>
       </div>
       ${dayHeadingsHtml(iso)}
-      <div class="kassa-row-list">${rows}</div>
+      ${rows ? `<div class="kassa-row-list">${rows}</div>` : `<div class="empty-state" style="padding:14px;">Ingen schemalagd denna dag.</div>`}
     `;
   });
 
