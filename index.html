@@ -4434,6 +4434,7 @@ function lagerChecklistaPosterHtml(interaktiv) {
             ${veckovis ? checkboxarHtml : ""}
             <div style="font-size:11px; margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">
               <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv && isChef() ? ` <a href="#" onclick='event.preventDefault(); openLagerChecklistaTilldela("${forsta.id}", ${JSON.stringify(rader.map(r => r.id))})' style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
+              ${forsta.deadline ? `<span style="font-weight:700; color:${!forsta.klar && forsta.deadline < isoDate(new Date()) ? "#b3261e" : "var(--muted)"};">${!forsta.klar && forsta.deadline < isoDate(new Date()) ? "⏰ Försenad, deadline var " : "Deadline: "}${fmtSvShort(forsta.deadline)}</span>` : ""}
               ${!veckovis && forsta.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${forsta.signerad_signum} · ${fmtSvShort(isoDate(new Date(forsta.signerad_at)))} ${fmtTime(new Date(forsta.signerad_at))}</span>` : ""}
             </div>
           </div>
@@ -4466,8 +4467,12 @@ async function toggleLagerChecklistaKlar(id, checked) {
   renderLagerChecklistaPoster(allaKlara);
 }
 
+let lagerTilldelaDeadlineDraft = null;
+
 function openLagerChecklistaTilldela(id, allaIds) {
   const idsAttUppdatera = allaIds || [id];
+  const rad = lagerChecklistaCache.find(x => x.id === id);
+  lagerTilldelaDeadlineDraft = rad ? rad.deadline : null;
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "lager-tilldela-overlay";
@@ -4476,10 +4481,16 @@ function openLagerChecklistaTilldela(id, allaIds) {
     <div class="kassa-modal-card">
       <div class="kassa-modal-title">Tilldela aktivitet</div>
       <div class="field-group">
+        <label class="field-label">Person</label>
         <select class="field-input" id="lager-tilldela-select">
           <option value="">Ingen</option>
-          ${lagerChecklistaAllaProfiler.map(u => `<option value="${u.id}">${u.name}</option>`).join("")}
+          ${lagerChecklistaAllaProfiler.map(u => `<option value="${u.id}" ${rad && rad.tilldelad_till === u.id ? "selected" : ""}>${u.name}</option>`).join("")}
         </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Deadline (valfritt)</label>
+        <button type="button" class="field-input kassa-date-btn" id="lager-tilldela-deadline-btn" onclick="openLagerTilldelaDeadlinePicker()">${lagerTilldelaDeadlineDraft ? fmtSvFull(lagerTilldelaDeadlineDraft) : "Ingen deadline"}</button>
+        <button type="button" class="btn-secondary" style="margin-top:6px;" onclick="clearLagerTilldelaDeadline()">Ta bort deadline</button>
       </div>
       <button class="btn-primary" onclick='saveLagerChecklistaTilldelning(${JSON.stringify(idsAttUppdatera)})'>Spara</button>
       <button class="btn-secondary" onclick="document.getElementById('lager-tilldela-overlay').remove()">Avbryt</button>
@@ -4488,10 +4499,27 @@ function openLagerChecklistaTilldela(id, allaIds) {
   document.body.appendChild(overlay);
 }
 
+function openLagerTilldelaDeadlinePicker() {
+  openGenericDatePicker(
+    () => lagerTilldelaDeadlineDraft || isoDate(new Date()),
+    (iso) => {
+      lagerTilldelaDeadlineDraft = iso;
+      const btn = document.getElementById("lager-tilldela-deadline-btn");
+      if (btn) btn.textContent = fmtSvFull(iso);
+    }
+  );
+}
+
+function clearLagerTilldelaDeadline() {
+  lagerTilldelaDeadlineDraft = null;
+  const btn = document.getElementById("lager-tilldela-deadline-btn");
+  if (btn) btn.textContent = "Ingen deadline";
+}
+
 async function saveLagerChecklistaTilldelning(ids) {
   const val = document.getElementById("lager-tilldela-select").value || null;
   for (const id of ids) {
-    const { error } = await sb.from("lager_checklista").update({ tilldelad_till: val }).eq("id", id);
+    const { error } = await sb.from("lager_checklista").update({ tilldelad_till: val, deadline: lagerTilldelaDeadlineDraft }).eq("id", id);
     if (error) { alert("Kunde inte spara: " + error.message); return; }
   }
   const overlay = document.getElementById("lager-tilldela-overlay");
@@ -4701,6 +4729,7 @@ function kvalitetPosterHtml(interaktiv) {
             ` : ""}
             <div style="font-size:11px; margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">
               <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv ? ` <a href="#" onclick='event.preventDefault(); openKvalitetTilldela("${p.id}")' style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
+              ${p.deadline ? `<span style="font-weight:700; color:${!p.klar && p.deadline < isoDate(new Date()) ? "#b3261e" : "var(--muted)"};">${!p.klar && p.deadline < isoDate(new Date()) ? "⏰ Försenad, deadline var " : "Deadline: "}${fmtSvShort(p.deadline)}</span>` : ""}
               ${p.klar && p.ej_aktuellt ? `<span style="color:var(--green-700); font-weight:700;">Ej aktuellt · markerat av ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
               ${p.klar && !p.ej_aktuellt ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
             </div>
@@ -4733,7 +4762,11 @@ async function toggleKvalitetEjAktuellt(id, checked) {
   renderKvalitetPoster();
 }
 
+let kvalitetTilldelaDeadlineDraft = null;
+
 function openKvalitetTilldela(id) {
+  const rad = kvalitetCache.find(x => x.id === id);
+  kvalitetTilldelaDeadlineDraft = rad ? rad.deadline : null;
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "kvalitet-tilldela-overlay";
@@ -4742,10 +4775,16 @@ function openKvalitetTilldela(id) {
     <div class="kassa-modal-card">
       <div class="kassa-modal-title">Tilldela aktivitet</div>
       <div class="field-group">
+        <label class="field-label">Person</label>
         <select class="field-input" id="kvalitet-tilldela-select">
           <option value="">Ingen</option>
-          ${kvalitetAllaProfiler.map(u => `<option value="${u.id}">${u.name}</option>`).join("")}
+          ${kvalitetAllaProfiler.map(u => `<option value="${u.id}" ${rad && rad.tilldelad_till === u.id ? "selected" : ""}>${u.name}</option>`).join("")}
         </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Deadline (valfritt)</label>
+        <button type="button" class="field-input kassa-date-btn" id="kvalitet-tilldela-deadline-btn" onclick="openKvalitetTilldelaDeadlinePicker()">${kvalitetTilldelaDeadlineDraft ? fmtSvFull(kvalitetTilldelaDeadlineDraft) : "Ingen deadline"}</button>
+        <button type="button" class="btn-secondary" style="margin-top:6px;" onclick="clearKvalitetTilldelaDeadline()">Ta bort deadline</button>
       </div>
       <button class="btn-primary" onclick="saveKvalitetTilldelning('${id}')">Spara</button>
       <button class="btn-secondary" onclick="document.getElementById('kvalitet-tilldela-overlay').remove()">Avbryt</button>
@@ -4754,9 +4793,26 @@ function openKvalitetTilldela(id) {
   document.body.appendChild(overlay);
 }
 
+function openKvalitetTilldelaDeadlinePicker() {
+  openGenericDatePicker(
+    () => kvalitetTilldelaDeadlineDraft || isoDate(new Date()),
+    (iso) => {
+      kvalitetTilldelaDeadlineDraft = iso;
+      const btn = document.getElementById("kvalitet-tilldela-deadline-btn");
+      if (btn) btn.textContent = fmtSvFull(iso);
+    }
+  );
+}
+
+function clearKvalitetTilldelaDeadline() {
+  kvalitetTilldelaDeadlineDraft = null;
+  const btn = document.getElementById("kvalitet-tilldela-deadline-btn");
+  if (btn) btn.textContent = "Ingen deadline";
+}
+
 async function saveKvalitetTilldelning(id) {
   const val = document.getElementById("kvalitet-tilldela-select").value || null;
-  const { error } = await sb.from("kvalitet_checklista").update({ tilldelad_till: val }).eq("id", id);
+  const { error } = await sb.from("kvalitet_checklista").update({ tilldelad_till: val, deadline: kvalitetTilldelaDeadlineDraft }).eq("id", id);
   if (error) { alert("Kunde inte spara: " + error.message); return; }
   const overlay = document.getElementById("kvalitet-tilldela-overlay");
   if (overlay) overlay.remove();
