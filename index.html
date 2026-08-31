@@ -679,7 +679,7 @@
       <button class="back-btn" onclick="showHome()">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <div class="title">Snabblänkar</div>
+      <div class="title">Övrigt</div>
     </div>
     <div class="kassa-content" id="snabblankar-results"></div>
   </div>
@@ -1156,12 +1156,12 @@ async function renderHomeForUser(user) {
   const snabblankarCardWrap = document.getElementById("nav-card-snabblankar");
   if (snabblankarCardWrap) {
     snabblankarCardWrap.innerHTML = `
-      <div class="nav-card" onclick="showSnabblankar()">
+      <div class="nav-card" onclick="showOvrigt()">
         <div class="nav-icon nav-icon-c1">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 17H7C4.8 17 3 15.2 3 13C3 10.8 4.8 9 7 9H9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M15 9H17C19.2 9 21 10.8 21 13C21 15.2 19.2 17 17 17H15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M8 13H16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </div>
-        <div class="nav-label">Snabblänkar</div>
-        <div class="nav-sub">Intranät, utbildning m.m.</div>
+        <div class="nav-label">Övrigt</div>
+        <div class="nav-sub">Länkar, lösenord m.m.</div>
       </div>
     `;
   }
@@ -1576,7 +1576,7 @@ function ideaStatusBadge(idea) {
 }
 
 function ideaRowHtml(idea, isChefView) {
-  const date = new Date(idea.created_at).toLocaleDateString("sv-SE", { day: "numeric", month: "short", year: "numeric" });
+  const date = fmtSvShort(isoDate(new Date(idea.created_at))) + " " + fmtTime(new Date(idea.created_at));
   const senderLabel = idea.is_anonymous ? "Anonym" : idea.signum;
   if (isChefView) {
     return `
@@ -1591,10 +1591,12 @@ function ideaRowHtml(idea, isChefView) {
       </div>
     `;
   }
+  const user = getCurrentUser();
+  const kanRedigera = user && idea.user_id === user.id && !idea.handled;
   return `
     <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-wrap:wrap;">
       <div style="flex:1; min-width:0;">
-        <div class="kr-signum" style="margin-bottom:2px; font-weight:400; color:var(--muted); font-size:11px;">${date}${idea.is_anonymous ? " · Skickad anonymt" : ""}</div>
+        <div class="kr-signum" style="margin-bottom:2px; font-weight:400; color:var(--muted); font-size:11px;">${date}${idea.is_anonymous ? " · Skickad anonymt" : ""}${kanRedigera ? ` · <a href="#" onclick="event.preventDefault(); openEditIdeaModal('${idea.id}')" style="color:var(--green-700); font-weight:700;">Redigera</a>` : ""}</div>
         <div style="font-size:13.5px; white-space:pre-wrap;">${idea.text}</div>
         ${idea.feedback_text ? `
           <div style="margin-top:6px; padding:8px; background:var(--green-050); border-radius:10px;">
@@ -1690,7 +1692,7 @@ async function renderIdeasView() {
 async function openIdeaHandleModal(id) {
   const idea = ideasCache.find(i => i.id === id);
   if (!idea) return;
-  const date = new Date(idea.created_at).toLocaleDateString("sv-SE", { day: "numeric", month: "short", year: "numeric" });
+  const date = fmtSvShort(isoDate(new Date(idea.created_at))) + " " + fmtTime(new Date(idea.created_at));
   const senderLabel = idea.is_anonymous ? "Anonym" : idea.signum;
 
   const overlay = document.createElement("div");
@@ -1776,6 +1778,39 @@ async function submitIdeaReply(id) {
     is_read: false,
   }).eq("id", id);
   if (error) { alert("Kunde inte skicka svaret: " + error.message); return; }
+  await renderIdeasView();
+}
+
+function openEditIdeaModal(id) {
+  const idea = ideasCache.find(i => i.id === id);
+  if (!idea) return;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "edit-idea-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Redigera idé</div>
+      <div class="field-group">
+        <textarea class="field-input" id="edit-idea-text" style="min-height:90px;">${idea.text}</textarea>
+      </div>
+      <div id="edit-idea-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="saveEditIdea('${id}')">Spara ändringar</button>
+      <button class="btn-secondary" onclick="document.getElementById('edit-idea-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function saveEditIdea(id) {
+  const text = document.getElementById("edit-idea-text").value.trim();
+  const errorBox = document.getElementById("edit-idea-error");
+  if (!text) { errorBox.textContent = "Skriv något innan du sparar."; return; }
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("ideer").update({ text }).eq("id", id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("edit-idea-overlay");
+  if (overlay) overlay.remove();
   await renderIdeasView();
 }
 
@@ -3079,6 +3114,12 @@ function openTraningDatePicker(fieldKey) {
 }
 
 /* ---- Pågående / Historik ---- */
+function traningResultatRedigerbar(slutDatum) {
+  const [y, m, d] = slutDatum.split("-").map(Number);
+  const grans = new Date(y, m - 1, d + 7); // "+7" hanterar månads-/årsskiften automatiskt
+  return isoDate(new Date()) <= isoDate(grans);
+}
+
 function traningCardHtml(t, isHistorik) {
   const board = leaderboardFor(t.id);
   const teamBoard = teamLeaderboardFor(t.id);
@@ -3131,13 +3172,14 @@ function traningCardHtml(t, isHistorik) {
         `).join("") : `<div class="empty-state">Inga deltagare.</div>`}
       </div>
 
-      ${!isHistorik && jagArDeltagare ? `
+      ${traningResultatRedigerbar(t.slut_datum) && jagArDeltagare ? `
         <div class="field-group" style="margin-top:14px;">
           <label class="field-label">Mata in dagens resultat</label>
           <input class="field-input" id="traning-input-${t.id}" type="number" inputmode="decimal" placeholder="0">
         </div>
         <button class="btn-secondary" onclick="submitTraningResultat('${t.id}')">Spara resultat</button>
         <div id="traning-result-error-${t.id}" style="color:#b3261e; font-size:12px; font-weight:700; text-align:center; margin-top:6px;"></div>
+        ${isHistorik ? `<div style="font-size:11px; color:var(--muted); margin-top:4px;">Tävlingen är avslutad — du kan fortfarande rätta dina resultat till och med ${fmtSvShort((() => { const [y,m,d] = t.slut_datum.split("-").map(Number); return isoDate(new Date(y, m-1, d+7)); })())}.</div>` : ""}
 
         ${(() => {
           const user = getCurrentUser();
@@ -3612,6 +3654,11 @@ function openInkopMallarModal() {
         <label class="field-label">Länk till beställningssida (valfritt)</label>
         <input class="field-input" id="inkop-mall-lank" type="text" placeholder="https://...">
       </div>
+      <div class="field-group">
+        <label class="field-label">Bild (valfritt)</label>
+        <input class="field-input" id="inkop-mall-bild" type="file" accept="image/*">
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">Ta ett foto eller välj från bildbiblioteket — bra för att känna igen varan snabbt.</div>
+      </div>
       <div id="inkop-mall-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
       <button class="btn-primary" onclick="submitInkopMall()">Lägg till vara</button>
 
@@ -3630,7 +3677,8 @@ function renderInkopMallarList() {
   wrap.innerHTML = inkopMallarCache.length
     ? `<div class="kassa-row-list">${inkopMallarCache.map(m => `
         <div class="kassa-row" style="cursor:default;">
-          <div style="flex:1; min-width:0;">
+          ${m.bild_url ? `<img src="${m.bild_url}" style="width:42px; height:42px; border-radius:10px; object-fit:cover; flex-shrink:0;">` : ""}
+          <div style="flex:1; min-width:0; margin-left:${m.bild_url ? "10px" : "0"};">
             <div style="font-weight:700;">${m.namn}</div>
             ${m.lank ? `<div style="font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.lank}</div>` : ""}
           </div>
@@ -3643,14 +3691,27 @@ function renderInkopMallarList() {
 async function submitInkopMall() {
   const namn = document.getElementById("inkop-mall-namn").value.trim();
   const lank = document.getElementById("inkop-mall-lank").value.trim();
+  const bildFile = document.getElementById("inkop-mall-bild").files[0];
   const errorBox = document.getElementById("inkop-mall-error");
   if (!namn) { errorBox.textContent = "Skriv ett namn."; return; }
   const user = getCurrentUser();
+
+  let bildUrl = null;
+  if (bildFile) {
+    errorBox.textContent = "Laddar upp bild…";
+    const path = `${user.id}/${Date.now()}-${bildFile.name}`;
+    const { error: uploadError } = await sb.storage.from("inkop-mallar").upload(path, bildFile);
+    if (uploadError) { errorBox.textContent = "Kunde inte ladda upp bilden: " + uploadError.message; return; }
+    const { data: publicUrlData } = sb.storage.from("inkop-mallar").getPublicUrl(path);
+    bildUrl = publicUrlData.publicUrl;
+  }
+
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("inkop_mallar").insert({ namn, lank, created_by: user.id });
+  const { error } = await sb.from("inkop_mallar").insert({ namn, lank, bild_url: bildUrl, created_by: user.id });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   document.getElementById("inkop-mall-namn").value = "";
   document.getElementById("inkop-mall-lank").value = "";
+  document.getElementById("inkop-mall-bild").value = "";
   errorBox.textContent = "";
   await loadInkop();
   renderInkopMallarList();
@@ -5446,11 +5507,28 @@ function deleteKampanj(id) {
   );
 }
 
-async function showSnabblankar() {
+/* ---- Övrigt (tidigare Snabblänkar) — tre flikar: Aktuella,
+   Fasta länkar, Lösenord. De två länk-flikarna fungerar identiskt,
+   bara skilda åt av en kategori-etikett. Alla får lägga till på
+   samtliga tre flikar. ---- */
+let ovrigtTab = "aktuella";
+let losenordCache = [];
+
+async function showOvrigt() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-snabblankar").style.display = "block";
+  ovrigtTab = "aktuella";
   await loadSnabblankar();
-  renderSnabblankarView();
+  renderOvrigtView();
+}
+
+function setOvrigtTab(tab) {
+  ovrigtTab = tab;
+  if (tab === "losenord") {
+    loadLosenord().then(renderOvrigtView);
+    return;
+  }
+  renderOvrigtView();
 }
 
 async function loadSnabblankar() {
@@ -5458,13 +5536,40 @@ async function loadSnabblankar() {
   snabblankarCache = error ? [] : data;
 }
 
-function renderSnabblankarView() {
+async function loadLosenord() {
+  const { data, error } = await sb.from("ovrigt_losenord").select("*").order("hemsida", { ascending: true });
+  losenordCache = error ? [] : data;
+}
+
+function renderOvrigtView() {
   const container = document.getElementById("snabblankar-results");
   container.innerHTML = `
-    ${isChef() ? `<button class="btn-primary" onclick="openNewSnabblankModal()">+ Ny länk</button>` : ""}
-    <div id="snabblankar-list" style="margin-top:16px;"></div>
+    <div class="view-toggle">
+      <button id="ovrigt-tab-aktuella" onclick="setOvrigtTab('aktuella')">Aktuella</button>
+      <button id="ovrigt-tab-fast" onclick="setOvrigtTab('fast')">Fasta länkar</button>
+      <button id="ovrigt-tab-losenord" onclick="setOvrigtTab('losenord')">Lösenord</button>
+    </div>
+    <div id="ovrigt-content" style="margin-top:16px;"></div>
   `;
-  renderSnabblankarList();
+  document.getElementById(`ovrigt-tab-${ovrigtTab}`).classList.add("active");
+
+  const contentWrap = document.getElementById("ovrigt-content");
+  if (ovrigtTab === "losenord") {
+    contentWrap.innerHTML = `
+      <button class="btn-primary" onclick="openNewLosenordModal()">+ Nytt lösenord</button>
+      <div style="font-size:11px; color:#b5590a; background:#fff3e6; border:1px solid #f3b989; border-radius:10px; padding:8px 10px; margin-top:10px;">
+        ⚠️ Inte en säker lösenordshanterare — allt är läsbart för alla inloggade. Använd bara för delade, icke-känsliga inloggningar.
+      </div>
+      <div id="losenord-list" style="margin-top:14px;"></div>
+    `;
+    renderLosenordList();
+  } else {
+    contentWrap.innerHTML = `
+      <button class="btn-primary" onclick="openNewSnabblankModal()">+ Ny länk</button>
+      <div id="snabblankar-list" style="margin-top:16px;"></div>
+    `;
+    renderSnabblankarList();
+  }
 }
 
 function openNewSnabblankModal() {
@@ -5532,19 +5637,20 @@ function selectSnabblankIkon(ic) {
 function renderSnabblankarList() {
   const wrap = document.getElementById("snabblankar-list");
   if (!wrap) return;
-  wrap.innerHTML = snabblankarCache.length
-    ? `<div class="kassa-row-list">${snabblankarCache.map(l => `
+  const list = snabblankarCache.filter(l => (l.kategori || "aktuella") === ovrigtTab);
+  wrap.innerHTML = list.length
+    ? `<div class="kassa-row-list">${list.map(l => `
         <div class="kassa-row" onclick="window.open('${l.url}', '_blank', 'noopener')">
           <div style="width:38px; height:38px; border-radius:11px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:18px; background:${avatarColorFor({ id: l.id, name: l.namn })}; box-shadow:0 3px 8px rgba(11,61,46,0.15);">${l.ikon || "🔗"}</div>
           <div style="flex:1; min-width:0; margin-left:10px;">
             <div style="font-weight:700;">${l.namn}</div>
             <div style="font-size:11px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.url}</div>
           </div>
-          ${isChef() ? `<button class="kr-edit" onclick="event.stopPropagation(); openEditSnabblankModal('${l.id}')" aria-label="Redigera">✎</button>` : ""}
+          <button class="kr-edit" onclick="event.stopPropagation(); openEditSnabblankModal('${l.id}')" aria-label="Redigera">✎</button>
           ${isChef() ? `<button class="kr-delete" onclick="event.stopPropagation(); deleteSnabblank('${l.id}')" aria-label="Ta bort">✕</button>` : ""}
         </div>
       `).join("")}</div>`
-    : `<div class="empty-state">Inga snabblänkar tillagda ännu.</div>`;
+    : `<div class="empty-state">Inga länkar tillagda ännu.</div>`;
 }
 
 async function submitSnabblank() {
@@ -5556,7 +5662,7 @@ async function submitSnabblank() {
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   const user = getCurrentUser();
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("snabblankar").insert({ namn, url, ikon: snabblankIkonDraft, created_by: user.id });
+  const { error } = await sb.from("snabblankar").insert({ namn, url, ikon: snabblankIkonDraft, kategori: ovrigtTab, created_by: user.id });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("snabblank-new-overlay");
   if (overlay) overlay.remove();
@@ -5623,6 +5729,158 @@ function deleteSnabblank(id) {
       if (error) { alert("Kunde inte ta bort: " + error.message); return; }
       await loadSnabblankar();
       renderSnabblankarList();
+    }
+  );
+}
+
+/* ---- Lösenord (delade inloggningar) ---- */
+function renderLosenordList() {
+  const wrap = document.getElementById("losenord-list");
+  if (!wrap) return;
+  wrap.innerHTML = losenordCache.length
+    ? `<div class="kassa-row-list">${losenordCache.map(p => `
+        <div class="kassa-row" style="cursor:default; align-items:flex-start;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700;">${p.hemsida}</div>
+            ${p.anvandarnamn ? `<div style="font-size:12px; margin-top:2px;">Användarnamn: ${p.anvandarnamn}</div>` : ""}
+            ${p.losenord ? `
+              <div style="font-size:12px; margin-top:2px; display:flex; align-items:center; gap:6px;">
+                Lösenord: <span id="losenord-mask-${p.id}" style="font-family:monospace;">••••••••</span>
+                <a href="#" onclick="event.preventDefault(); toggleLosenordVisning('${p.id}')" style="color:var(--green-700); font-weight:700; font-size:11px;">Visa</a>
+              </div>
+            ` : ""}
+            ${p.anteckning ? `<div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${p.anteckning}</div>` : ""}
+          </div>
+          <button class="kr-edit" onclick="openEditLosenordModal('${p.id}')" aria-label="Redigera">✎</button>
+          ${isChef() ? `<button class="kr-delete" onclick="deleteLosenord('${p.id}')" aria-label="Ta bort">✕</button>` : ""}
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">Inga lösenord tillagda ännu.</div>`;
+}
+
+function toggleLosenordVisning(id) {
+  const p = losenordCache.find(x => x.id === id);
+  if (!p) return;
+  const el = document.getElementById(`losenord-mask-${id}`);
+  if (!el) return;
+  const dold = el.textContent === "••••••••";
+  el.textContent = dold ? p.losenord : "••••••••";
+}
+
+function openNewLosenordModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "losenord-new-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Nytt lösenord</div>
+      <div class="field-group">
+        <label class="field-label">Hemsida</label>
+        <input class="field-input" id="losenord-hemsida" type="text" placeholder="T.ex. leverantör.se">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Användarnamn</label>
+        <input class="field-input" id="losenord-anvandarnamn" type="text">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Lösenord</label>
+        <input class="field-input" id="losenord-losenord" type="text">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Anteckning (valfritt)</label>
+        <input class="field-input" id="losenord-anteckning" type="text">
+      </div>
+      <div id="losenord-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitLosenord()">Spara</button>
+      <button class="btn-secondary" onclick="document.getElementById('losenord-new-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function submitLosenord() {
+  const hemsida = document.getElementById("losenord-hemsida").value.trim();
+  const errorBox = document.getElementById("losenord-error");
+  if (!hemsida) { errorBox.textContent = "Skriv en hemsida."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("ovrigt_losenord").insert({
+    hemsida,
+    anvandarnamn: document.getElementById("losenord-anvandarnamn").value.trim(),
+    losenord: document.getElementById("losenord-losenord").value.trim(),
+    anteckning: document.getElementById("losenord-anteckning").value.trim(),
+    created_by: user.id,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("losenord-new-overlay");
+  if (overlay) overlay.remove();
+  await loadLosenord();
+  renderLosenordList();
+}
+
+function openEditLosenordModal(id) {
+  const p = losenordCache.find(x => x.id === id);
+  if (!p) return;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "losenord-edit-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Redigera lösenord</div>
+      <div class="field-group">
+        <label class="field-label">Hemsida</label>
+        <input class="field-input" id="losenord-edit-hemsida" type="text" value="${p.hemsida}">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Användarnamn</label>
+        <input class="field-input" id="losenord-edit-anvandarnamn" type="text" value="${p.anvandarnamn || ""}">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Lösenord</label>
+        <input class="field-input" id="losenord-edit-losenord" type="text" value="${p.losenord || ""}">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Anteckning (valfritt)</label>
+        <input class="field-input" id="losenord-edit-anteckning" type="text" value="${p.anteckning || ""}">
+      </div>
+      <div id="losenord-edit-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="saveLosenordEdit('${id}')">Spara ändringar</button>
+      <button class="btn-secondary" onclick="document.getElementById('losenord-edit-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function saveLosenordEdit(id) {
+  const hemsida = document.getElementById("losenord-edit-hemsida").value.trim();
+  const errorBox = document.getElementById("losenord-edit-error");
+  if (!hemsida) { errorBox.textContent = "Skriv en hemsida."; return; }
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("ovrigt_losenord").update({
+    hemsida,
+    anvandarnamn: document.getElementById("losenord-edit-anvandarnamn").value.trim(),
+    losenord: document.getElementById("losenord-edit-losenord").value.trim(),
+    anteckning: document.getElementById("losenord-edit-anteckning").value.trim(),
+  }).eq("id", id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("losenord-edit-overlay");
+  if (overlay) overlay.remove();
+  await loadLosenord();
+  renderLosenordList();
+}
+
+function deleteLosenord(id) {
+  const p = losenordCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort lösenord?",
+    `Inloggningen till <strong>${p ? p.hemsida : "hemsidan"}</strong> tas bort permanent. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("ovrigt_losenord").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadLosenord();
+      renderLosenordList();
     }
   );
 }
@@ -6579,7 +6837,8 @@ async function renderTodayWidget(user) {
   const profileById = {};
   allProfiles.forEach(p => { profileById[p.id] = p; });
 
-  const activeTraningar = traningarCache.filter(t => t.start_datum <= todayIso && t.slut_datum >= todayIso);
+  const yesterdayIso = isoDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const activeTraningar = traningarCache.filter(t => t.start_datum <= todayIso && t.slut_datum >= yesterdayIso);
 
   /* Bygg varje "kräver din uppmärksamhet"-ruta som en egen HTML-bit, så vi
      kan räkna dem och antingen visa dem var för sig (som innan) eller,
