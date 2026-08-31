@@ -3682,6 +3682,7 @@ function renderInkopMallarList() {
             <div style="font-weight:700;">${m.namn}</div>
             ${m.lank ? `<div style="font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.lank}</div>` : ""}
           </div>
+          <button class="kr-edit" onclick="openEditInkopMallModal('${m.id}')" aria-label="Redigera">✎</button>
           <button class="kr-delete" onclick="deleteInkopMall('${m.id}')" aria-label="Ta bort">✕</button>
         </div>
       `).join("")}</div>`
@@ -3713,6 +3714,66 @@ async function submitInkopMall() {
   document.getElementById("inkop-mall-lank").value = "";
   document.getElementById("inkop-mall-bild").value = "";
   errorBox.textContent = "";
+  await loadInkop();
+  renderInkopMallarList();
+}
+
+function openEditInkopMallModal(id) {
+  const m = inkopMallarCache.find(x => x.id === id);
+  if (!m) return;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "inkop-mall-edit-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Redigera vara</div>
+      <div class="field-group">
+        <label class="field-label">Namn</label>
+        <input class="field-input" id="inkop-mall-edit-namn" type="text" value="${m.namn}">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Länk till beställningssida (valfritt)</label>
+        <input class="field-input" id="inkop-mall-edit-lank" type="text" value="${m.lank || ""}">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Bild (valfritt)</label>
+        ${m.bild_url ? `<img src="${m.bild_url}" style="width:60px; height:60px; border-radius:10px; object-fit:cover; margin-bottom:6px;">` : ""}
+        <input class="field-input" id="inkop-mall-edit-bild" type="file" accept="image/*">
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">${m.bild_url ? "Lämna tomt för att behålla nuvarande bild, eller välj en ny för att ersätta." : "Ta ett foto eller välj från bildbiblioteket."}</div>
+      </div>
+      <div id="inkop-mall-edit-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="saveInkopMallEdit('${id}')">Spara ändringar</button>
+      <button class="btn-secondary" onclick="document.getElementById('inkop-mall-edit-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function saveInkopMallEdit(id) {
+  const m = inkopMallarCache.find(x => x.id === id);
+  const namn = document.getElementById("inkop-mall-edit-namn").value.trim();
+  const lank = document.getElementById("inkop-mall-edit-lank").value.trim();
+  const bildFile = document.getElementById("inkop-mall-edit-bild").files[0];
+  const errorBox = document.getElementById("inkop-mall-edit-error");
+  if (!namn) { errorBox.textContent = "Skriv ett namn."; return; }
+  const user = getCurrentUser();
+
+  let bildUrl = m ? m.bild_url : null;
+  if (bildFile) {
+    errorBox.textContent = "Laddar upp bild…";
+    const path = `${user.id}/${Date.now()}-${bildFile.name}`;
+    const { error: uploadError } = await sb.storage.from("inkop-mallar").upload(path, bildFile);
+    if (uploadError) { errorBox.textContent = "Kunde inte ladda upp bilden: " + uploadError.message; return; }
+    const { data: publicUrlData } = sb.storage.from("inkop-mallar").getPublicUrl(path);
+    bildUrl = publicUrlData.publicUrl;
+  }
+
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("inkop_mallar").update({ namn, lank, bild_url: bildUrl }).eq("id", id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("inkop-mall-edit-overlay");
+  if (overlay) overlay.remove();
   await loadInkop();
   renderInkopMallarList();
 }
