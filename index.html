@@ -3432,18 +3432,44 @@ const PRIORITET_LABEL = { rod: "Hög prioritet", gul: "Mellan prioritet", gron: 
 let taskAssignCache = [];
 let taskAssignAllProfiles = [];
 let taskAssignDraft = null;
+let aterkommandeMallarCache = [];
 
 function emptyTaskAssignDraft() {
-  return { targetUserId: "", text: "", deadline: isoDate(new Date()), prioritet: "gul" };
+  return { targetUserId: "", text: "", deadline: isoDate(new Date()), prioritet: "gul", tillAlla: false, aterkommande: false, veckodag: 1 };
+}
+
+let aterkommandeUppgifterKollade = null; // veckans måndags-ISO, senast kontrollerad denna session
+async function ensureAterkommandeUppgifterFinns() {
+  const mandagIso = isoDate(startOfWeek(new Date()));
+  if (aterkommandeUppgifterKollade === mandagIso) return; // redan kontrollerat denna vecka, denna session
+  const { data: mallar } = await sb.from("tilldelade_uppgifter").select("*").eq("aterkommande", true);
+  if (mallar && mallar.length) {
+    const mandag = startOfWeek(new Date());
+    for (const mall of mallar) {
+      const malDatum = new Date(mandag);
+      malDatum.setDate(malDatum.getDate() + (mall.veckodag - 1));
+      const malDatumIso = isoDate(malDatum);
+      const { data: befintlig } = await sb.from("tilldelade_uppgifter").select("id").eq("mall_id", mall.id).eq("deadline", malDatumIso);
+      if (befintlig && befintlig.length) continue; // redan skapad denna vecka
+      await sb.from("tilldelade_uppgifter").insert({
+        target_user_id: mall.target_user_id, text: mall.text, deadline: malDatumIso, prioritet: mall.prioritet,
+        created_by: mall.created_by, mall_id: mall.id, aterkommande: false,
+      });
+    }
+  }
+  aterkommandeUppgifterKollade = mandagIso;
 }
 
 async function loadTaskAssignments() {
+  await ensureAterkommandeUppgifterFinns();
   const [profilesRes, tasksRes] = await Promise.all([
     fetchProfiles(),
     sb.from("tilldelade_uppgifter").select("*").order("deadline", { ascending: true }),
   ]);
   taskAssignAllProfiles = profilesRes;
-  taskAssignCache = tasksRes.data || [];
+  const alla = tasksRes.data || [];
+  taskAssignCache = alla.filter(t => !t.aterkommande); // bara faktiska instanser, inte mallarna själva
+  aterkommandeMallarCache = alla.filter(t => t.aterkommande);
 }
 
 /* ---- Reklamation ---- */
@@ -3469,7 +3495,7 @@ let inkopTab = "att-bestalla";
 let inkopCache = [];
 let inkopMallarCache = [];
 let inkopSearchQuery = "";
-let inkopDraft = { vad: "", antal: 1, lank: "" };
+let inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null };
 
 function normalizeSearch(s) {
   return (s || "").toLowerCase().normalize("NFKD").replace(/\s+/g, " ").trim();
@@ -3514,7 +3540,7 @@ function renderInkopView() {
   const container = document.getElementById("inkop-results");
   container.innerHTML = `
     <button class="btn-primary" onclick="openNewInkopModal()">+ Ny beställning</button>
-    ${isChef() ? `<button class="btn-secondary" onclick="openInkopMallarModal()">⚙️ Hantera vanliga varor</button>` : ""}
+    <button class="btn-secondary" onclick="openInkopMallarModal()">⚙️ Hantera vanliga varor</button>
 
     <div class="field-group" style="margin-top:16px;">
       <input class="field-input" type="text" placeholder="🔍 Sök på vad som ska beställas..." value="${inkopSearchQuery}" oninput="setInkopSearch(this.value)">
@@ -3555,7 +3581,7 @@ function renderInkopList() {
 }
 
 function openNewInkopModal() {
-  inkopDraft = { vad: "", antal: 1, lank: "" };
+  inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "inkop-new-overlay";
@@ -3566,11 +3592,11 @@ function openNewInkopModal() {
       ${inkopMallarCache.length ? `
         <div class="field-group">
           <label class="field-label">Välj från vanliga varor (valfritt)</label>
-          <select class="field-input" onchange="selectInkopMall(this.value)">
-            <option value="">Skriv fritt istället...</option>
-            ${inkopMallarCache.map(m => `<option value="${m.id}">${m.namn}</option>`).join("")}
-          </select>
+          <button type="button" class="field-input" id="inkop-mall-picker-btn" style="text-align:left; cursor:pointer;" onclick="openInkopMallPicker()">
+            ${inkopDraft.valdMallId ? "Ändra val..." : "Tryck för att välja..."}
+          </button>
         </div>
+        <div id="inkop-vald-mall-preview"></div>
       ` : ""}
       <div class="field-group">
         <label class="field-label">Vad ska beställas?</label>
@@ -3588,13 +3614,53 @@ function openNewInkopModal() {
   document.body.appendChild(overlay);
 }
 
+function openInkopMallPicker() {
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "inkop-mall-picker-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Välj vara</div>
+      <div class="kassa-row-list">
+        ${inkopMallarCache.map(m => `
+          <div class="kassa-row" onclick="selectInkopMall('${m.id}'); document.getElementById('inkop-mall-picker-overlay').remove();">
+            ${m.bild_url ? `<img src="${m.bild_url}" style="width:38px; height:38px; border-radius:10px; object-fit:cover; flex-shrink:0;">` : ""}
+            <div style="flex:1; min-width:0; margin-left:${m.bild_url ? "10px" : "0"};">
+              <div style="font-weight:700;">${m.namn}</div>
+              ${m.vnr ? `<div style="font-size:11px; color:var(--green-700); font-weight:700;">VNR ${m.vnr}</div>` : ""}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      <button class="btn-secondary" onclick="document.getElementById('inkop-mall-picker-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
 function selectInkopMall(mallId) {
   const mall = inkopMallarCache.find(m => m.id === mallId);
   if (!mall) return;
   inkopDraft.vad = mall.namn;
   inkopDraft.lank = mall.lank || "";
+  inkopDraft.valdMallId = mallId;
   const input = document.getElementById("inkop-vad-input");
   if (input) input.value = mall.namn;
+  const previewWrap = document.getElementById("inkop-vald-mall-preview");
+  if (previewWrap) {
+    previewWrap.innerHTML = `
+      <div style="display:flex; align-items:center; gap:10px; background:var(--green-050); border-radius:12px; padding:8px 10px; margin-top:-4px; margin-bottom:14px;">
+        ${mall.bild_url ? `<img src="${mall.bild_url}" style="width:44px; height:44px; border-radius:10px; object-fit:cover; flex-shrink:0;">` : ""}
+        <div style="min-width:0;">
+          <div style="font-weight:700; font-size:13px;">${mall.namn}</div>
+          ${mall.vnr ? `<div style="font-size:11.5px; color:var(--green-700); font-weight:700;">VNR ${mall.vnr}</div>` : ""}
+        </div>
+      </div>
+    `;
+  }
+  const knapp = document.getElementById("inkop-mall-picker-btn");
+  if (knapp) knapp.textContent = "Ändra val...";
 }
 
 async function submitInkop() {
@@ -3651,6 +3717,10 @@ function openInkopMallarModal() {
         <input class="field-input" id="inkop-mall-namn" type="text" placeholder="T.ex. Kassakvitton">
       </div>
       <div class="field-group">
+        <label class="field-label">VNR (valfritt)</label>
+        <input class="field-input" id="inkop-mall-vnr" type="text" inputmode="numeric" placeholder="T.ex. 123456">
+      </div>
+      <div class="field-group">
         <label class="field-label">Länk till beställningssida (valfritt)</label>
         <input class="field-input" id="inkop-mall-lank" type="text" placeholder="https://...">
       </div>
@@ -3680,6 +3750,7 @@ function renderInkopMallarList() {
           ${m.bild_url ? `<img src="${m.bild_url}" style="width:42px; height:42px; border-radius:10px; object-fit:cover; flex-shrink:0;">` : ""}
           <div style="flex:1; min-width:0; margin-left:${m.bild_url ? "10px" : "0"};">
             <div style="font-weight:700;">${m.namn}</div>
+            ${m.vnr ? `<div style="font-size:11px; color:var(--green-700); font-weight:700;">VNR ${m.vnr}</div>` : ""}
             ${m.lank ? `<div style="font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.lank}</div>` : ""}
           </div>
           <button class="kr-edit" onclick="openEditInkopMallModal('${m.id}')" aria-label="Redigera">✎</button>
@@ -3691,6 +3762,7 @@ function renderInkopMallarList() {
 
 async function submitInkopMall() {
   const namn = document.getElementById("inkop-mall-namn").value.trim();
+  const vnr = document.getElementById("inkop-mall-vnr").value.trim();
   const lank = document.getElementById("inkop-mall-lank").value.trim();
   const bildFile = document.getElementById("inkop-mall-bild").files[0];
   const errorBox = document.getElementById("inkop-mall-error");
@@ -3708,9 +3780,10 @@ async function submitInkopMall() {
   }
 
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("inkop_mallar").insert({ namn, lank, bild_url: bildUrl, created_by: user.id });
+  const { error } = await sb.from("inkop_mallar").insert({ namn, vnr, lank, bild_url: bildUrl, created_by: user.id });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   document.getElementById("inkop-mall-namn").value = "";
+  document.getElementById("inkop-mall-vnr").value = "";
   document.getElementById("inkop-mall-lank").value = "";
   document.getElementById("inkop-mall-bild").value = "";
   errorBox.textContent = "";
@@ -3733,6 +3806,10 @@ function openEditInkopMallModal(id) {
         <input class="field-input" id="inkop-mall-edit-namn" type="text" value="${m.namn}">
       </div>
       <div class="field-group">
+        <label class="field-label">VNR (valfritt)</label>
+        <input class="field-input" id="inkop-mall-edit-vnr" type="text" inputmode="numeric" value="${m.vnr || ""}">
+      </div>
+      <div class="field-group">
         <label class="field-label">Länk till beställningssida (valfritt)</label>
         <input class="field-input" id="inkop-mall-edit-lank" type="text" value="${m.lank || ""}">
       </div>
@@ -3753,6 +3830,7 @@ function openEditInkopMallModal(id) {
 async function saveInkopMallEdit(id) {
   const m = inkopMallarCache.find(x => x.id === id);
   const namn = document.getElementById("inkop-mall-edit-namn").value.trim();
+  const vnr = document.getElementById("inkop-mall-edit-vnr").value.trim();
   const lank = document.getElementById("inkop-mall-edit-lank").value.trim();
   const bildFile = document.getElementById("inkop-mall-edit-bild").files[0];
   const errorBox = document.getElementById("inkop-mall-edit-error");
@@ -3770,7 +3848,7 @@ async function saveInkopMallEdit(id) {
   }
 
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("inkop_mallar").update({ namn, lank, bild_url: bildUrl }).eq("id", id);
+  const { error } = await sb.from("inkop_mallar").update({ namn, vnr, lank, bild_url: bildUrl }).eq("id", id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("inkop-mall-edit-overlay");
   if (overlay) overlay.remove();
@@ -6330,19 +6408,46 @@ function renderTasksView() {
   const chef = isChef();
   const d = taskAssignDraft;
 
+  const VECKODAGAR = ["", "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
   const formHtml = chef ? `
     <div class="kassa-section-title">Ny uppgift</div>
     <div class="field-group">
-      <label class="field-label">Användare</label>
-      <select class="field-input" id="task-target-user" onchange="taskAssignDraft.targetUserId = this.value">
-        <option value="">Välj person</option>
-        ${taskAssignAllProfiles.map(p => `<option value="${p.id}" ${d.targetUserId === p.id ? "selected" : ""}>${p.name}</option>`).join("")}
-      </select>
+      <label class="field-label">Tilldela till</label>
+      <div style="display:flex; gap:8px;">
+        <button type="button" onclick="taskAssignDraft.tillAlla = false; renderTasksView();" style="flex:1; padding:10px; border-radius:12px; border:2px solid ${!d.tillAlla ? "var(--green-700)" : "var(--line)"}; background:${!d.tillAlla ? "var(--green-050)" : "var(--white)"}; cursor:pointer; font-size:12.5px; font-weight:700;">En person</button>
+        <button type="button" onclick="taskAssignDraft.tillAlla = true; renderTasksView();" style="flex:1; padding:10px; border-radius:12px; border:2px solid ${d.tillAlla ? "var(--green-700)" : "var(--line)"}; background:${d.tillAlla ? "var(--green-050)" : "var(--white)"}; cursor:pointer; font-size:12.5px; font-weight:700;">Alla</button>
+      </div>
+      ${d.tillAlla ? `<div style="font-size:11px; color:var(--muted); margin-top:6px;">Uppgiften syns för alla — bockar en person av den försvinner den direkt för alla andra också.</div>` : ""}
     </div>
+    ${!d.tillAlla ? `
+      <div class="field-group">
+        <label class="field-label">Användare</label>
+        <select class="field-input" id="task-target-user" onchange="taskAssignDraft.targetUserId = this.value">
+          <option value="">Välj person</option>
+          ${taskAssignAllProfiles.map(p => `<option value="${p.id}" ${d.targetUserId === p.id ? "selected" : ""}>${p.name}</option>`).join("")}
+        </select>
+      </div>
+    ` : ""}
     <div class="field-group">
-      <label class="field-label">Deadline</label>
-      <button type="button" class="field-input kassa-date-btn" onclick="openTaskDatePicker()">${fmtSvFull(d.deadline)}</button>
+      <label class="kassa-check-row" style="border:1px solid var(--line); border-radius:12px;">
+        <input type="checkbox" ${d.aterkommande ? "checked" : ""} onchange="taskAssignDraft.aterkommande = this.checked; renderTasksView();">
+        <span class="kassa-check-name" style="font-weight:400;">Återkommande varje vecka</span>
+      </label>
     </div>
+    ${d.aterkommande ? `
+      <div class="field-group">
+        <label class="field-label">Vilken veckodag</label>
+        <select class="field-input" id="task-veckodag" onchange="taskAssignDraft.veckodag = parseInt(this.value)">
+          ${[1,2,3,4,5,6,7].map(v => `<option value="${v}" ${d.veckodag === v ? "selected" : ""}>${VECKODAGAR[v]}</option>`).join("")}
+        </select>
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">Uppgiften skapas automatiskt på nytt varje vecka, den valda veckodagen.</div>
+      </div>
+    ` : `
+      <div class="field-group">
+        <label class="field-label">Deadline</label>
+        <button type="button" class="field-input kassa-date-btn" onclick="openTaskDatePicker()">${fmtSvFull(d.deadline)}</button>
+      </div>
+    `}
     <div class="field-group">
       <label class="field-label">Uppgift</label>
       <textarea class="field-input" id="task-text" style="min-height:70px;" placeholder="Vad ska göras?" oninput="taskAssignDraft.text = this.value">${d.text}</textarea>
@@ -6360,9 +6465,27 @@ function renderTasksView() {
     </div>
     <div id="task-form-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:10px 0 8px;"></div>
     <button class="btn-primary" onclick="submitTaskAssignment()">Tilldela uppgift</button>
+
+    ${aterkommandeMallarCache.length ? `
+      <div class="kassa-section-title" style="margin-top:20px;">Återkommande uppgifter</div>
+      <div class="kassa-row-list">
+        ${aterkommandeMallarCache.map(m => {
+          const p = taskAssignAllProfiles.find(x => x.id === m.target_user_id);
+          return `
+          <div class="kassa-row" style="cursor:default;">
+            <div style="flex:1; min-width:0;">
+              <div style="font-weight:700; font-size:13px;">${m.text}</div>
+              <div style="font-size:11px; color:var(--muted); margin-top:2px;">Varje ${VECKODAGAR[m.veckodag].toLowerCase()} · ${m.target_user_id ? (p ? p.name : "Okänd") : "Alla"}</div>
+            </div>
+            <button class="kr-delete" onclick="deleteAterkommandeMall('${m.id}')" aria-label="Ta bort">✕</button>
+          </div>
+        `;
+        }).join("")}
+      </div>
+    ` : ""}
   ` : "";
 
-  const relevant = chef ? taskAssignCache : taskAssignCache.filter(t => t.target_user_id === user.id);
+  const relevant = chef ? taskAssignCache : taskAssignCache.filter(t => t.target_user_id === user.id || t.target_user_id === null);
   const todayIsoForTasks = isoDate(new Date());
   const isOverdue = (t) => !t.is_done && t.deadline < todayIsoForTasks;
   const sorted = [...relevant].sort((a, b) => {
@@ -6383,7 +6506,7 @@ function renderTasksView() {
           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
             <span class="priority-badge ${t.prioritet}"><span class="priority-dot ${t.prioritet}"></span>${PRIORITET_LABEL[t.prioritet]}</span>
             ${overdue ? `<span class="org-badge" style="background:#b3261e; color:var(--white); font-weight:800;">⏰ Försenad</span>` : ""}
-            ${chef ? `<span style="font-size:11px; color:var(--muted);">${profile ? profile.name : "Okänd"}</span>` : ""}
+            ${chef ? `<span style="font-size:11px; color:var(--muted);">${t.target_user_id ? (profile ? profile.name : "Okänd") : "👥 Alla"}</span>` : ""}
             <span style="font-size:11px; color:${overdue ? "#b3261e" : "var(--muted)"}; font-weight:${overdue ? "700" : "400"};">Deadline: ${fmtSvShort(t.deadline)}</span>
           </div>
           <div style="font-size:13.5px; margin-top:3px; ${t.is_done ? "text-decoration:line-through; color:var(--muted);" : ""}">${t.text}</div>
@@ -6403,17 +6526,42 @@ function renderTasksView() {
 async function submitTaskAssignment() {
   const d = taskAssignDraft;
   const errorBox = document.getElementById("task-form-error");
-  if (!d.targetUserId) { errorBox.textContent = "Välj vem uppgiften ska gå till."; return; }
+  if (!d.tillAlla && !d.targetUserId) { errorBox.textContent = "Välj vem uppgiften ska gå till, eller välj Alla."; return; }
   if (!d.text.trim()) { errorBox.textContent = "Skriv vad uppgiften gäller."; return; }
   const user = getCurrentUser();
+  const targetUserId = d.tillAlla ? null : d.targetUserId;
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("tilldelade_uppgifter").insert({
-    target_user_id: d.targetUserId, text: d.text.trim(), deadline: d.deadline, prioritet: d.prioritet, created_by: user.id,
-  });
-  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+
+  if (d.aterkommande) {
+    const { error } = await sb.from("tilldelade_uppgifter").insert({
+      target_user_id: targetUserId, text: d.text.trim(), prioritet: d.prioritet, created_by: user.id,
+      aterkommande: true, veckodag: d.veckodag, deadline: null,
+    });
+    if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+    aterkommandeUppgifterKollade = null; // tvinga fram en ny kontroll så den nya mallen genererar sin instans direkt
+  } else {
+    const { error } = await sb.from("tilldelade_uppgifter").insert({
+      target_user_id: targetUserId, text: d.text.trim(), deadline: d.deadline, prioritet: d.prioritet, created_by: user.id,
+    });
+    if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  }
   taskAssignDraft = emptyTaskAssignDraft();
   await loadTaskAssignments();
   renderTasksView();
+}
+
+function deleteAterkommandeMall(id) {
+  const mall = aterkommandeMallarCache.find(m => m.id === id);
+  confirmDelete(
+    "Ta bort återkommande uppgift?",
+    `<strong>${mall ? mall.text : "Uppgiften"}</strong> slutar skapas varje vecka. Redan skapade veckoinstanser påverkas inte. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("tilldelade_uppgifter").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadTaskAssignments();
+      renderTasksView();
+    }
+  );
 }
 
 async function toggleTaskAssignmentDone(id, checked) {
@@ -6841,6 +6989,7 @@ async function renderTodayWidget(user) {
   // onödigt långsam. Alla oberoende frågor körs nu samtidigt istället för
   // en efter en, vilket är den största hastighetsvinsten.
   const allProfilesForToday = await fetchProfiles();
+  await ensureAterkommandeUppgifterFinns();
 
   const [
     ,
@@ -6857,7 +7006,7 @@ async function renderTodayWidget(user) {
     unseenLedighetSvarRes,
   ] = await Promise.all([
     loadFranvaroCache(),
-    sb.from("tilldelade_uppgifter").select("*").eq("target_user_id", user.id).eq("is_done", false).order("deadline", { ascending: true }),
+    sb.from("tilldelade_uppgifter").select("*").or(`target_user_id.eq.${user.id},target_user_id.is.null`).eq("is_done", false).eq("aterkommande", false).order("deadline", { ascending: true }),
     getPinnedStjarnor(),
     isChefUser ? loadPendingOnskemal() : Promise.resolve([]),
     isChefUser ? loadPendingFriskanmalningar() : Promise.resolve([]),
