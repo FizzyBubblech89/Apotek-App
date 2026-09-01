@@ -1410,6 +1410,35 @@ async function renderProfileView() {
     <div id="profile-save-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
     <button class="btn-primary" onclick="saveOwnProfile()">Spara</button>
 
+    <div class="kassa-section-title" style="margin-top:28px;">HLR</div>
+    <label class="kassa-check-row" style="border:1px solid var(--line); border-radius:12px;">
+      <input type="checkbox" id="profile-hlr" ${user.hlr_utbildad ? "checked" : ""}>
+      <span class="kassa-check-name" style="font-weight:400;">Jag är HLR-utbildad</span>
+    </label>
+
+    <div class="kassa-section-title" style="margin-top:20px;">Födelsedatum</div>
+    <div class="field-group">
+      <button type="button" class="field-input kassa-date-btn" id="profile-fodelsedatum-btn" onclick="openProfileFodelsedatumPicker()">${user.fodelsedatum ? fmtSvFull(user.fodelsedatum) : "Ej angivet"}</button>
+      <div style="font-size:11px; color:var(--muted); margin-top:4px;">Visas som en notis för alla på din födelsedag.</div>
+    </div>
+
+    <div class="kassa-section-title" style="margin-top:20px;">Anhörig</div>
+    <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Synligt för alla under Organisationsschemat.</div>
+    <div class="field-group">
+      <label class="field-label">Namn</label>
+      <input class="field-input" id="profile-anhorig-namn" type="text" value="${user.anhorig_namn || ""}">
+    </div>
+    <div class="field-group">
+      <label class="field-label">Relation</label>
+      <input class="field-input" id="profile-anhorig-relation" type="text" placeholder="T.ex. Partner, förälder..." value="${user.anhorig_relation || ""}">
+    </div>
+    <div class="field-group">
+      <label class="field-label">Telefonnummer</label>
+      <input class="field-input" id="profile-anhorig-telefon" type="tel" value="${user.anhorig_telefon || ""}">
+    </div>
+    <div id="profile-extra-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+    <button class="btn-primary" onclick="saveProfileExtra()">Spara HLR, födelsedatum & anhörig</button>
+
     <div class="kassa-section-title" style="margin-top:28px;">Byt PIN-kod</div>
     <div class="field-group">
       <label class="field-label">Ny PIN-kod (minst 6 tecken)</label>
@@ -1451,6 +1480,38 @@ async function saveOwnProfile() {
   await refreshCurrentProfile();
   errorBox.textContent = "";
   await renderHomeForUser(getCurrentUser());
+  await renderProfileView();
+}
+
+let profileFodelsedatumDraft = null;
+function openProfileFodelsedatumPicker() {
+  const user = getCurrentUser();
+  openGenericDatePicker(
+    () => profileFodelsedatumDraft || user.fodelsedatum || isoDate(new Date()),
+    (iso) => {
+      profileFodelsedatumDraft = iso;
+      const btn = document.getElementById("profile-fodelsedatum-btn");
+      if (btn) btn.textContent = fmtSvFull(iso);
+    }
+  );
+}
+
+async function saveProfileExtra() {
+  const user = getCurrentUser();
+  const errorBox = document.getElementById("profile-extra-error");
+  const hlr_utbildad = document.getElementById("profile-hlr").checked;
+  const fodelsedatum = profileFodelsedatumDraft || user.fodelsedatum || null;
+  const anhorig_namn = document.getElementById("profile-anhorig-namn").value.trim();
+  const anhorig_relation = document.getElementById("profile-anhorig-relation").value.trim();
+  const anhorig_telefon = document.getElementById("profile-anhorig-telefon").value.trim();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("profiles").update({
+    hlr_utbildad, fodelsedatum, anhorig_namn, anhorig_relation, anhorig_telefon,
+  }).eq("id", user.id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  profileFodelsedatumDraft = null;
+  await refreshCurrentProfile();
+  errorBox.textContent = "";
   await renderProfileView();
 }
 
@@ -1500,6 +1561,7 @@ function orgCardHtml(u) {
   const badges = [
     ...(u.utbildning ? [u.utbildning] : []),
     ...(u.roll_funktioner || []),
+    ...(u.hlr_utbildad ? ["HLR"] : []),
   ];
   const avatar = u.avatar_url
     ? `<img src="${u.avatar_url}" style="width:100%; height:100%; object-fit:cover;">`
@@ -1513,6 +1575,13 @@ function orgCardHtml(u) {
       ${badges.length ? `
         <div class="org-badges">
           ${badges.map(b => `<span class="org-badge">${b}</span>`).join("")}
+        </div>
+      ` : ""}
+      ${u.anhorig_namn ? `
+        <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--line); width:100%; font-size:9.5px; color:var(--muted); text-align:center;">
+          <div style="font-weight:700; color:var(--ink);">Anhörig: ${u.anhorig_namn}</div>
+          ${u.anhorig_relation ? `<div>${u.anhorig_relation}</div>` : ""}
+          ${u.anhorig_telefon ? `<div>${u.anhorig_telefon}</div>` : ""}
         </div>
       ` : ""}
     </div>
@@ -7054,6 +7123,19 @@ async function renderTodayWidget(user) {
      kan räkna dem och antingen visa dem var för sig (som innan) eller,
      om det blir fler än 5, samla dem bakom en enda rad. */
   const noticeBlocks = [];
+
+  const todayMD = todayIso.slice(5); // "MM-DD", oberoende av år
+  const fodelsedagsbarn = allProfilesForToday.filter(p => p.fodelsedatum && p.fodelsedatum.slice(5) === todayMD);
+  fodelsedagsbarn.forEach(p => {
+    const key = `birthday-${p.id}-${new Date().getFullYear()}`;
+    if (isNotisSnoozed(key)) return;
+    noticeBlocks.push(`
+      <div style="background:linear-gradient(150deg, #fff3e6, #ffe8d1); border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+        <span style="flex:1;">🎂 Idag fyller ${p.name} år!</span>
+        ${notisMuteButtonHtml(key)}
+      </div>
+    `);
+  });
 
   if (pendingLedighet.length && !isNotisSnoozed("ledighet-pending")) {
     noticeBlocks.push(`
