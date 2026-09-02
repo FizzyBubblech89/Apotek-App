@@ -1563,6 +1563,8 @@ async function showOrgChart() {
   await renderOrgChart();
 }
 
+let orgChartUsersCache = [];
+
 function orgCardHtml(u) {
   const badges = [
     ...(u.utbildning ? [u.utbildning] : []),
@@ -1573,32 +1575,63 @@ function orgCardHtml(u) {
     : (u.name || "?").charAt(0).toUpperCase();
   const orgAvatarBg = u.avatar_url ? "" : `background:${avatarColorFor(u)};`;
   return `
-    <div class="org-card">
-      <div class="org-avatar" style="${orgAvatarBg}">${avatar}</div>
+    <div class="org-card" onclick="openOrgPersonDetail('${u.id}')" style="cursor:pointer;">
+      <div style="position:relative; width:100%; display:flex; justify-content:center;">
+        <div class="org-avatar" style="${orgAvatarBg}">${avatar}</div>
+        ${u.hlr_utbildad ? `<span style="position:absolute; top:-2px; right:16%; font-size:13px;" title="HLR-utbildad">❤️</span>` : ""}
+      </div>
       <div class="org-name">${u.name}</div>
       <div class="org-signum">${u.signum}</div>
-      ${u.telefonnummer ? `<a href="tel:${u.telefonnummer.replace(/[^0-9+]/g, "")}" onclick="event.stopPropagation();" style="display:block; font-size:10.5px; color:var(--green-700); font-weight:700; margin-top:2px; text-decoration:none;">📞 ${u.telefonnummer}</a>` : ""}
-      ${badges.length || u.hlr_utbildad ? `
+      ${badges.length ? `
         <div class="org-badges">
-          ${badges.map(b => `<span class="org-badge">${b}</span>`).join("")}
-          ${u.hlr_utbildad ? `<span class="org-badge" style="background:#fdecec; color:#b3261e;">❤️ HLR</span>` : ""}
-        </div>
-      ` : ""}
-      ${u.anhorig_namn ? `
-        <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--line); width:100%; font-size:9.5px; color:var(--muted); text-align:center;">
-          <div style="font-weight:700; color:var(--ink);">Anhörig: ${u.anhorig_namn}</div>
-          ${u.anhorig_relation ? `<div>${u.anhorig_relation}</div>` : ""}
-          ${u.anhorig_telefon ? `<a href="tel:${u.anhorig_telefon.replace(/[^0-9+]/g, "")}" onclick="event.stopPropagation();" style="display:block; color:var(--green-700); font-weight:700; text-decoration:none;">${u.anhorig_telefon}</a>` : ""}
+          ${badges.slice(0, 2).map(b => `<span class="org-badge">${b}</span>`).join("")}
+          ${badges.length > 2 ? `<span class="org-badge" style="background:var(--line); color:var(--muted);">+${badges.length - 2}</span>` : ""}
         </div>
       ` : ""}
     </div>
   `;
 }
 
+function openOrgPersonDetail(id) {
+  const u = orgChartUsersCache.find(x => x.id === id);
+  if (!u) return;
+  const badges = [
+    ...(u.utbildning ? [u.utbildning] : []),
+    ...(u.roll_funktioner || []),
+  ];
+  const avatar = u.avatar_url
+    ? `<img src="${u.avatar_url}" style="width:100%; height:100%; object-fit:cover;">`
+    : (u.name || "?").charAt(0).toUpperCase();
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "org-person-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card" style="text-align:center;">
+      <div class="org-avatar" style="width:64px; height:64px; font-size:24px; margin:0 auto 10px; ${u.avatar_url ? "" : `background:${avatarColorFor(u)};`}">${avatar}</div>
+      <div class="kassa-modal-title" style="justify-content:center;">${u.name}${u.hlr_utbildad ? ` <span style="font-size:16px;" title="HLR-utbildad">❤️</span>` : ""}</div>
+      <div style="font-size:12.5px; color:var(--muted); margin-top:-6px; margin-bottom:10px;">${u.signum}</div>
+      ${badges.length ? `<div class="org-badges" style="justify-content:center; margin-bottom:14px;">${badges.map(b => `<span class="org-badge">${b}</span>`).join("")}</div>` : ""}
+      ${u.telefonnummer ? `<a href="tel:${u.telefonnummer.replace(/[^0-9+]/g, "")}" style="display:block; color:var(--green-700); font-weight:700; text-decoration:none; margin-bottom:6px;">📞 ${u.telefonnummer}</a>` : ""}
+      ${u.anhorig_namn ? `
+        <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line); text-align:left;">
+          <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Anhörig</div>
+          <div style="font-weight:700; font-size:13.5px;">${u.anhorig_namn}</div>
+          ${u.anhorig_relation ? `<div style="font-size:12.5px; color:var(--muted);">${u.anhorig_relation}</div>` : ""}
+          ${u.anhorig_telefon ? `<a href="tel:${u.anhorig_telefon.replace(/[^0-9+]/g, "")}" style="display:block; color:var(--green-700); font-weight:700; text-decoration:none; margin-top:2px;">📞 ${u.anhorig_telefon}</a>` : ""}
+        </div>
+      ` : ""}
+      <button class="btn-secondary" style="margin-top:18px;" onclick="document.getElementById('org-person-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
 async function renderOrgChart() {
   const container = document.getElementById("org-results");
   container.innerHTML = `<div class="empty-state">Laddar…</div>`;
   const users = await fetchProfiles();
+  orgChartUsersCache = users;
   if (!users.length) { container.innerHTML = `<div class="empty-state">Inga användare hittades.</div>`; return; }
 
   const chefer = users.filter(u => u.role === "chef");
