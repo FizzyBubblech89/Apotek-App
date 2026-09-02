@@ -313,7 +313,13 @@
   /* ---- Org chart (Mitt apotek) ---- */
   .org-chart { display: flex; flex-direction: column; align-items: center; padding: 8px 0 24px; }
   .org-level { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; }
-  .org-level-emp { max-width: 100%; }
+  .org-level-emp {
+    max-width: 100%; padding-top: 24px; border-top: 2px solid var(--line); position: relative; margin-top: 2px;
+  }
+  .org-level-emp .org-card { position: relative; }
+  .org-level-emp .org-card::before {
+    content: ""; position: absolute; top: -24px; left: 50%; width: 2px; height: 24px; background: var(--line);
+  }
   .org-connector { width: 2px; height: 26px; background: var(--line); margin: 4px 0; }
   .org-card {
     background: linear-gradient(150deg, #ffffff, #d9f0e2); border: 1px solid var(--green-300); border-radius: 20px;
@@ -490,6 +496,8 @@
         <div id="nav-card-lager"></div>
 
         <div id="nav-card-kvalitet"></div>
+
+        <div id="nav-card-kundmote"></div>
 
         <div id="nav-card-users"></div>
 
@@ -715,6 +723,17 @@
       <div class="title">Kvalité</div>
     </div>
     <div class="kassa-content" id="kvalitet-results"></div>
+  </div>
+
+  <!-- KUNDMÖTE VIEW -->
+  <div id="view-kundmote" style="display:none;">
+    <div class="topbar with-back">
+      <button class="back-btn" id="kundmote-back-btn" onclick="kundmoteBack()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="title">Kundmöte</div>
+    </div>
+    <div class="kassa-content" id="kundmote-results"></div>
   </div>
 
   <!-- LEDIGHETSANSÖKAN VIEW -->
@@ -1024,6 +1043,7 @@ async function logout() {
   document.getElementById("view-kampanj").style.display = "none";
   document.getElementById("view-lager").style.display = "none";
   document.getElementById("view-kvalitet").style.display = "none";
+  document.getElementById("view-kundmote").style.display = "none";
   document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-login").style.display = "block";
   await renderLoginScreen();
@@ -1206,6 +1226,19 @@ async function renderHomeForUser(user) {
         </div>
         <div class="nav-label">Kvalité</div>
         <div class="nav-sub">LMA-checklista</div>
+      </div>
+    `;
+  }
+
+  const kundmoteCardWrap = document.getElementById("nav-card-kundmote");
+  if (kundmoteCardWrap) {
+    kundmoteCardWrap.innerHTML = `
+      <div class="nav-card" onclick="showKundmote()">
+        <div class="nav-icon nav-icon-c2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 5H20V16H8L4 20V5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="nav-label">Kundmöte</div>
+        <div class="nav-sub">MYS m.m.</div>
       </div>
     `;
   }
@@ -1576,10 +1609,8 @@ function orgCardHtml(u) {
   const orgAvatarBg = u.avatar_url ? "" : `background:${avatarColorFor(u)};`;
   return `
     <div class="org-card" onclick="openOrgPersonDetail('${u.id}')" style="cursor:pointer;">
-      <div style="position:relative; width:100%; display:flex; justify-content:center;">
-        <div class="org-avatar" style="${orgAvatarBg}">${avatar}</div>
-        ${u.hlr_utbildad ? `<span style="position:absolute; top:-2px; right:16%; font-size:13px;" title="HLR-utbildad">❤️</span>` : ""}
-      </div>
+      <div class="org-avatar" style="${orgAvatarBg}">${avatar}</div>
+      ${u.hlr_utbildad ? `<div style="font-size:9.5px; font-weight:700; color:#b3261e; margin-top:2px;">❤️ (HLR utbildad)</div>` : ""}
       <div class="org-name">${u.name}</div>
       <div class="org-signum">${u.signum}</div>
       ${badges.length ? `
@@ -1609,7 +1640,8 @@ function openOrgPersonDetail(id) {
   overlay.innerHTML = `
     <div class="kassa-modal-card" style="text-align:center;">
       <div class="org-avatar" style="width:64px; height:64px; font-size:24px; margin:0 auto 10px; ${u.avatar_url ? "" : `background:${avatarColorFor(u)};`}">${avatar}</div>
-      <div class="kassa-modal-title" style="justify-content:center;">${u.name}${u.hlr_utbildad ? ` <span style="font-size:16px;" title="HLR-utbildad">❤️</span>` : ""}</div>
+      ${u.hlr_utbildad ? `<div style="font-size:11px; font-weight:700; color:#b3261e; margin-bottom:6px;">❤️ (HLR utbildad)</div>` : ""}
+      <div class="kassa-modal-title" style="justify-content:center;">${u.name}</div>
       <div style="font-size:12.5px; color:var(--muted); margin-top:-6px; margin-bottom:10px;">${u.signum}</div>
       ${badges.length ? `<div class="org-badges" style="justify-content:center; margin-bottom:14px;">${badges.map(b => `<span class="org-badge">${b}</span>`).join("")}</div>` : ""}
       ${u.telefonnummer ? `<a href="tel:${u.telefonnummer.replace(/[^0-9+]/g, "")}" style="display:block; color:var(--green-700); font-weight:700; text-decoration:none; margin-bottom:6px;">📞 ${u.telefonnummer}</a>` : ""}
@@ -1636,6 +1668,7 @@ async function renderOrgChart() {
 
   const chefer = users.filter(u => u.role === "chef");
   const anstallda = users.filter(u => u.role !== "chef");
+  const alfabetisk = [...users].sort((a, b) => a.name.localeCompare(b.name, "sv"));
 
   container.innerHTML = `
     <div class="org-chart">
@@ -1648,6 +1681,21 @@ async function renderOrgChart() {
           ${anstallda.map(u => orgCardHtml(u)).join("")}
         </div>
       ` : ""}
+    </div>
+
+    <div class="kassa-section-title" style="margin-top:8px;">Alla i bokstavsordning</div>
+    <div class="kassa-row-list">
+      ${alfabetisk.map(u => `
+        <div class="kassa-row" onclick="openOrgPersonDetail('${u.id}')">
+          <div style="width:34px; height:34px; border-radius:50%; overflow:hidden; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; color:var(--white); ${u.avatar_url ? "" : `background:${avatarColorFor(u)};`}">
+            ${u.avatar_url ? `<img src="${u.avatar_url}" style="width:100%; height:100%; object-fit:cover;">` : (u.name || "?").charAt(0).toUpperCase()}
+          </div>
+          <div style="flex:1; min-width:0; margin-left:10px;">
+            <div style="font-weight:700; font-size:13px;">${u.name}${u.hlr_utbildad ? ` <span style="font-size:11px;">❤️</span>` : ""}</div>
+            <div style="font-size:11px; color:var(--muted);">${u.signum}${u.role === "chef" ? " · Chef" : ""}${u.utbildning ? ` · ${u.utbildning}` : ""}</div>
+          </div>
+        </div>
+      `).join("")}
     </div>
   `;
 }
@@ -2205,6 +2253,7 @@ async function showHome() {
   document.getElementById("view-kampanj").style.display = "none";
   document.getElementById("view-lager").style.display = "none";
   document.getElementById("view-kvalitet").style.display = "none";
+  document.getElementById("view-kundmote").style.display = "none";
   document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-home").style.display = "block";
   window.scrollTo(0, 0);
@@ -3833,9 +3882,11 @@ async function submitInkop() {
   const errorBox = document.getElementById("inkop-new-error");
   if (!inkopDraft.vad.trim()) { errorBox.textContent = "Skriv vad som ska beställas."; return; }
   const user = getCurrentUser();
+  const vald = inkopDraft.valdMallId ? inkopMallarCache.find(m => m.id === inkopDraft.valdMallId) : null;
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("inkop").insert({
-    vad: inkopDraft.vad.trim(), antal: inkopDraft.antal || 1, lank: inkopDraft.lank || "", created_by: user.id,
+    vad: inkopDraft.vad.trim(), antal: inkopDraft.antal || 1, lank: inkopDraft.lank || "",
+    tilldelad_till: vald ? vald.tilldelad_till : null, created_by: user.id,
   });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("inkop-new-overlay");
@@ -3870,7 +3921,9 @@ function deleteInkop(id) {
 }
 
 /* ---- Chefens mallar (förbestämda varor med ev. länk) ---- */
-function openInkopMallarModal() {
+let inkopMallarAllaProfiler = [];
+async function openInkopMallarModal() {
+  inkopMallarAllaProfiler = await fetchProfiles();
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "inkop-mallar-overlay";
@@ -3889,6 +3942,14 @@ function openInkopMallarModal() {
       <div class="field-group">
         <label class="field-label">Länk till beställningssida (valfritt)</label>
         <input class="field-input" id="inkop-mall-lank" type="text" placeholder="https://...">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Tilldela ansvarig (valfritt)</label>
+        <select class="field-input" id="inkop-mall-tilldelad">
+          <option value="">Ingen — vem som helst köper in</option>
+          ${inkopMallarAllaProfiler.map(p => `<option value="${p.id}">${p.name}</option>`).join("")}
+        </select>
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">Den personen får en notis så fort någon lägger en beställning på den här varan.</div>
       </div>
       <div class="field-group">
         <label class="field-label">Bild (valfritt)</label>
@@ -3930,6 +3991,7 @@ async function submitInkopMall() {
   const namn = document.getElementById("inkop-mall-namn").value.trim();
   const vnr = document.getElementById("inkop-mall-vnr").value.trim();
   const lank = document.getElementById("inkop-mall-lank").value.trim();
+  const tilldelad_till = document.getElementById("inkop-mall-tilldelad").value || null;
   const bildFile = document.getElementById("inkop-mall-bild").files[0];
   const errorBox = document.getElementById("inkop-mall-error");
   if (!namn) { errorBox.textContent = "Skriv ett namn."; return; }
@@ -3946,7 +4008,7 @@ async function submitInkopMall() {
   }
 
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("inkop_mallar").insert({ namn, vnr, lank, bild_url: bildUrl, created_by: user.id });
+  const { error } = await sb.from("inkop_mallar").insert({ namn, vnr, lank, bild_url: bildUrl, tilldelad_till, created_by: user.id });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   document.getElementById("inkop-mall-namn").value = "";
   document.getElementById("inkop-mall-vnr").value = "";
@@ -3980,6 +4042,13 @@ function openEditInkopMallModal(id) {
         <input class="field-input" id="inkop-mall-edit-lank" type="text" value="${m.lank || ""}">
       </div>
       <div class="field-group">
+        <label class="field-label">Tilldela ansvarig (valfritt)</label>
+        <select class="field-input" id="inkop-mall-edit-tilldelad">
+          <option value="">Ingen — vem som helst köper in</option>
+          ${inkopMallarAllaProfiler.map(p => `<option value="${p.id}" ${m.tilldelad_till === p.id ? "selected" : ""}>${p.name}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field-group">
         <label class="field-label">Bild (valfritt)</label>
         ${m.bild_url ? `<img src="${m.bild_url}" style="width:60px; height:60px; border-radius:10px; object-fit:cover; margin-bottom:6px;">` : ""}
         <input class="field-input" id="inkop-mall-edit-bild" type="file" accept="image/*">
@@ -3998,6 +4067,7 @@ async function saveInkopMallEdit(id) {
   const namn = document.getElementById("inkop-mall-edit-namn").value.trim();
   const vnr = document.getElementById("inkop-mall-edit-vnr").value.trim();
   const lank = document.getElementById("inkop-mall-edit-lank").value.trim();
+  const tilldelad_till = document.getElementById("inkop-mall-edit-tilldelad").value || null;
   const bildFile = document.getElementById("inkop-mall-edit-bild").files[0];
   const errorBox = document.getElementById("inkop-mall-edit-error");
   if (!namn) { errorBox.textContent = "Skriv ett namn."; return; }
@@ -4014,7 +4084,7 @@ async function saveInkopMallEdit(id) {
   }
 
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("inkop_mallar").update({ namn, vnr, lank, bild_url: bildUrl }).eq("id", id);
+  const { error } = await sb.from("inkop_mallar").update({ namn, vnr, lank, bild_url: bildUrl, tilldelad_till }).eq("id", id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("inkop-mall-edit-overlay");
   if (overlay) overlay.remove();
@@ -5575,6 +5645,207 @@ function deleteLedighet(id) {
       if (error) { alert("Kunde inte ta bort: " + error.message); return; }
       await loadLedighet();
       renderLedighetList();
+    }
+  );
+}
+
+/* ---- Kundmöte (hubb) — börjar med MYS (Mystery Shopper) ---- */
+let kundmoteSection = "hub";
+
+async function showKundmote() {
+  document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-kundmote").style.display = "block";
+  kundmoteSection = "hub";
+  renderKundmoteHub();
+}
+
+function kundmoteBack() {
+  if (kundmoteSection === "hub") { showHome(); return; }
+  kundmoteSection = "hub";
+  renderKundmoteHub();
+}
+
+function renderKundmoteHub() {
+  const container = document.getElementById("kundmote-results");
+  container.innerHTML = `
+    <div class="btn-grid">
+      <div class="nav-card" onclick="showMys()">
+        <div class="nav-icon nav-icon-c2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 11L11 13L15 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/></svg>
+        </div>
+        <div class="nav-label">MYS</div>
+        <div class="nav-sub">Mystery Shopper</div>
+      </div>
+    </div>
+  `;
+}
+
+const MYS_KATEGORIER = ["Rx", "EV", "E-handel"];
+const MYS_MANADSNAMN = ["", "Januari", "Februari", "Mars", "April", "Maj", "Juni", "Juli", "Augusti", "September", "Oktober", "November", "December"];
+let mysCache = [];
+let mysDraft = { kategori: "Rx", manad: new Date().getMonth() + 1, ar: new Date().getFullYear(), resultat: "" };
+
+function mysFarg(resultat) {
+  if (resultat <= 55) return { bg: "#fdecec", text: "#b3261e", stapel: "#e57373" };
+  if (resultat <= 64) return { bg: "#fff3d6", text: "#b5590a", stapel: "#f0c14b" };
+  return { bg: "var(--green-100)", text: "var(--green-700)", stapel: "#4caf82" };
+}
+
+async function showMys() {
+  kundmoteSection = "mys";
+  await loadMysResultat();
+  renderMysView();
+}
+
+async function loadMysResultat() {
+  const { data, error } = await sb.from("mys_resultat").select("*").order("ar", { ascending: true }).order("manad", { ascending: true });
+  mysCache = error ? [] : data;
+}
+
+function renderMysView() {
+  const container = document.getElementById("kundmote-results");
+  container.innerHTML = `
+    <button class="btn-primary" onclick="openNewMysModal()">Registrera ny MYS</button>
+    <div id="mys-content" style="margin-top:16px;"></div>
+  `;
+  renderMysContent();
+}
+
+function renderMysContent() {
+  const wrap = document.getElementById("mys-content");
+  wrap.innerHTML = `
+    <div class="kassa-section-title" style="margin-top:14px;">Senaste 10 mätningarna</div>
+    <div id="mys-chart" style="margin-bottom:18px;"></div>
+    <div class="kassa-section-title">Alla mätningar</div>
+    <div id="mys-list"></div>
+  `;
+  document.getElementById("mys-chart").innerHTML = mysChartHtml(mysCache.slice(-10));
+  renderMysList(mysCache);
+}
+
+function mysChartHtml(rader) {
+  if (!rader.length) return `<div class="empty-state">Inga mätningar registrerade ännu.</div>`;
+  const bredd = 320, hojd = 160, padding = 24;
+  const barBredd = (bredd - padding * 2) / rader.length;
+  const staplar = rader.map((r, i) => {
+    const f = mysFarg(r.resultat);
+    const barHojd = (r.resultat / 100) * (hojd - padding * 2);
+    const x = padding + i * barBredd + barBredd * 0.15;
+    const y = hojd - padding - barHojd;
+    const w = barBredd * 0.7;
+    return `
+      <rect x="${x}" y="${y}" width="${w}" height="${barHojd}" rx="3" fill="${f.stapel}"></rect>
+      <text x="${x + w / 2}" y="${y - 4}" font-size="9" text-anchor="middle" fill="var(--ink)" font-weight="700">${r.resultat}</text>
+      <text x="${x + w / 2}" y="${hojd - 14}" font-size="6.5" text-anchor="middle" fill="var(--green-700)" font-weight="700">${r.kategori}</text>
+      <text x="${x + w / 2}" y="${hojd - 5}" font-size="7" text-anchor="middle" fill="var(--muted)">${MYS_MANADSNAMN[r.manad].slice(0, 3)} ${String(r.ar).slice(2)}</text>
+    `;
+  }).join("");
+  // Referenslinjer för gränserna 55 och 65
+  const linje55Y = hojd - padding - (55 / 100) * (hojd - padding * 2);
+  const linje65Y = hojd - padding - (65 / 100) * (hojd - padding * 2);
+  return `
+    <svg viewBox="0 0 ${bredd} ${hojd}" style="width:100%; height:auto; background:var(--white); border:1px solid var(--line); border-radius:14px;">
+      <line x1="${padding}" y1="${linje55Y}" x2="${bredd - padding}" y2="${linje55Y}" stroke="#e57373" stroke-width="0.75" stroke-dasharray="3,3"></line>
+      <line x1="${padding}" y1="${linje65Y}" x2="${bredd - padding}" y2="${linje65Y}" stroke="#4caf82" stroke-width="0.75" stroke-dasharray="3,3"></line>
+      ${staplar}
+    </svg>
+    <div style="display:flex; gap:12px; justify-content:center; margin-top:6px; font-size:10px; color:var(--muted);">
+      <span>🔴 0–55</span><span>🟡 56–64</span><span>🟢 65–100</span>
+    </div>
+  `;
+}
+
+function renderMysList(rader) {
+  const wrap = document.getElementById("mys-list");
+  const sorterad = [...rader].sort((a, b) => b.ar - a.ar || b.manad - a.manad);
+  wrap.innerHTML = sorterad.length
+    ? `<div class="kassa-row-list">${sorterad.map(r => {
+        const f = mysFarg(r.resultat);
+        return `
+        <div class="kassa-row" style="cursor:default;">
+          <div style="flex:1;">
+            <div>${MYS_MANADSNAMN[r.manad]} ${r.ar}</div>
+            <div style="font-size:10.5px; color:var(--green-700); font-weight:700;">${r.kategori}</div>
+          </div>
+          <span class="org-badge" style="background:${f.bg}; color:${f.text}; font-weight:800; font-size:11px; padding:4px 10px;">${r.resultat}</span>
+          ${isChef() ? `<button class="kr-delete" onclick="deleteMysResultat('${r.id}')" aria-label="Ta bort">✕</button>` : ""}
+        </div>
+      `;
+      }).join("")}</div>`
+    : `<div class="empty-state">Inga mätningar registrerade ännu.</div>`;
+}
+
+function openNewMysModal() {
+  mysDraft = { kategori: "Rx", manad: new Date().getMonth() + 1, ar: new Date().getFullYear(), resultat: "" };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "mys-new-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Registrera ny MYS</div>
+      <div class="field-group">
+        <label class="field-label">Kategori</label>
+        <div style="display:flex; gap:8px;" id="mys-kategori-picker"></div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Månad</label>
+        <select class="field-input" id="mys-manad-select" onchange="mysDraft.manad = parseInt(this.value)">
+          ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${mysDraft.manad === m ? "selected" : ""}>${MYS_MANADSNAMN[m]}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">År</label>
+        <input class="field-input" id="mys-ar-input" type="number" value="${mysDraft.ar}" oninput="mysDraft.ar = parseInt(this.value)">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Resultat (0–100)</label>
+        <input class="field-input" id="mys-resultat-input" type="number" min="0" max="100" placeholder="T.ex. 78" oninput="mysDraft.resultat = this.value">
+      </div>
+      <div id="mys-new-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitMysResultat()">Spara</button>
+      <button class="btn-secondary" onclick="document.getElementById('mys-new-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  renderMysKategoriPicker();
+}
+
+function renderMysKategoriPicker() {
+  const wrap = document.getElementById("mys-kategori-picker");
+  if (!wrap) return;
+  wrap.innerHTML = MYS_KATEGORIER.map(k => `
+    <button type="button" onclick="mysDraft.kategori = '${k}'; renderMysKategoriPicker();"
+      style="flex:1; padding:10px; border-radius:12px; border:2px solid ${mysDraft.kategori === k ? "var(--green-700)" : "var(--line)"}; background:${mysDraft.kategori === k ? "var(--green-050)" : "var(--white)"}; cursor:pointer; font-size:12.5px; font-weight:700;">${k}</button>
+  `).join("");
+}
+
+async function submitMysResultat() {
+  const errorBox = document.getElementById("mys-new-error");
+  const resultat = num(mysDraft.resultat);
+  if (mysDraft.resultat === "" || isNaN(resultat)) { errorBox.textContent = "Fyll i ett resultat."; return; }
+  if (resultat < 0 || resultat > 100) { errorBox.textContent = "Resultatet måste vara mellan 0 och 100."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("mys_resultat").insert({
+    kategori: mysDraft.kategori, manad: mysDraft.manad, ar: mysDraft.ar, resultat, created_by: user.id,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("mys-new-overlay");
+  if (overlay) overlay.remove();
+  await loadMysResultat();
+  renderMysView();
+}
+
+function deleteMysResultat(id) {
+  confirmDelete(
+    "Ta bort mätning?",
+    "MYS-resultatet tas bort permanent. Det går inte att ångra.",
+    async () => {
+      const { error } = await sb.from("mys_resultat").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadMysResultat();
+      renderMysContent();
     }
   );
 }
@@ -7170,6 +7441,7 @@ async function renderTodayWidget(user) {
     snoozeRes,
     pendingLedighetRes,
     unseenLedighetSvarRes,
+    inkopTilldeladeRes,
   ] = await Promise.all([
     loadFranvaroCache(),
     sb.from("tilldelade_uppgifter").select("*").or(`target_user_id.eq.${user.id},target_user_id.is.null`).eq("is_done", false).eq("aterkommande", false).order("deadline", { ascending: true }),
@@ -7185,6 +7457,7 @@ async function renderTodayWidget(user) {
     sb.from("notis_snooze").select("*").eq("user_id", user.id),
     isChefUser ? sb.from("ledighetsansokan").select("id").eq("status", "vantar") : Promise.resolve({ data: [] }),
     sb.from("ledighetsansokan").select("*").eq("user_id", user.id).eq("svar_sedd", false),
+    sb.from("inkop").select("*").eq("tilldelad_till", user.id).eq("bestalld", false),
   ]);
 
   notisSnoozeMap = {};
@@ -7229,6 +7502,18 @@ async function renderTodayWidget(user) {
     noticeBlocks.push(`
       <div onclick="openFodelsedagHalsningModal('${p.id}', '${p.name.replace(/'/g, "\\'")}')" style="cursor:pointer; background:linear-gradient(150deg, #fff3e6, #ffe8d1); border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
         <span style="flex:1;">🎂 Idag fyller ${p.name} år! <span style="font-weight:400; font-size:10px;">· tryck för att hälsa</span></span>
+        ${notisMuteButtonHtml(key)}
+      </div>
+    `);
+  });
+
+  const inkopTilldelade = inkopTilldeladeRes.data || [];
+  inkopTilldelade.forEach(i => {
+    const key = `inkop-tilldelning-${i.id}`;
+    if (isNotisSnoozed(key)) return;
+    noticeBlocks.push(`
+      <div onclick="showInkop()" style="cursor:pointer; background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:6px 10px; margin-bottom:4px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
+        <span style="flex:1;">🛒 Du är ansvarig för att köpa in: ${i.vad}</span>
         ${notisMuteButtonHtml(key)}
       </div>
     `);
