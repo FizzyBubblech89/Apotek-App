@@ -1212,8 +1212,8 @@ async function renderHomeForUser(user) {
 
 }
 
-const UTBILDNINGAR = ["Farmacevt (apotekare)", "Farmacevt (receptarie)", "Apotekstekniker", "Apoteksassistent"];
-const ROLLFUNKTIONER = ["VA", "LMA", "SA", "FA"];
+const UTBILDNINGAR = ["Farmacevt (apotekare)", "Farmacevt (apotekarstudent)", "Farmacevt (receptarie)", "Farmacevt (receptariestudent)", "Apotekstekniker", "Apoteksassistent"];
+const ROLLFUNKTIONER = ["VA", "LMA", "SA", "FA", "AC"];
 
 /* ---- Users management (Chef only) ---- */
 async function showUsers() {
@@ -1588,7 +1588,7 @@ function orgCardHtml(u) {
         <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--line); width:100%; font-size:9.5px; color:var(--muted); text-align:center;">
           <div style="font-weight:700; color:var(--ink);">Anhörig: ${u.anhorig_namn}</div>
           ${u.anhorig_relation ? `<div>${u.anhorig_relation}</div>` : ""}
-          ${u.anhorig_telefon ? `<div>${u.anhorig_telefon}</div>` : ""}
+          ${u.anhorig_telefon ? `<a href="tel:${u.anhorig_telefon.replace(/[^0-9+]/g, "")}" onclick="event.stopPropagation();" style="display:block; color:var(--green-700); font-weight:700; text-decoration:none;">${u.anhorig_telefon}</a>` : ""}
         </div>
       ` : ""}
     </div>
