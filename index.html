@@ -1577,7 +1577,7 @@ function orgCardHtml(u) {
       <div class="org-avatar" style="${orgAvatarBg}">${avatar}</div>
       <div class="org-name">${u.name}</div>
       <div class="org-signum">${u.signum}</div>
-      ${u.telefonnummer ? `<div style="font-size:10.5px; color:var(--muted); margin-top:2px;">📞 ${u.telefonnummer}</div>` : ""}
+      ${u.telefonnummer ? `<a href="tel:${u.telefonnummer.replace(/[^0-9+]/g, "")}" onclick="event.stopPropagation();" style="display:block; font-size:10.5px; color:var(--green-700); font-weight:700; margin-top:2px; text-decoration:none;">📞 ${u.telefonnummer}</a>` : ""}
       ${badges.length || u.hlr_utbildad ? `
         <div class="org-badges">
           ${badges.map(b => `<span class="org-badge">${b}</span>`).join("")}
