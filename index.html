@@ -3710,7 +3710,7 @@ let inkopTab = "att-bestalla";
 let inkopCache = [];
 let inkopMallarCache = [];
 let inkopSearchQuery = "";
-let inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null };
+let inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null, anteckning: "" };
 
 function normalizeSearch(s) {
   return (s || "").toLowerCase().normalize("NFKD").replace(/\s+/g, " ").trim();
@@ -3788,6 +3788,7 @@ function renderInkopList() {
               Antal: ${i.antal}${i.bestalld && i.bestalld_datum ? ` · Beställt ${fmtSvShort(i.bestalld_datum)}` : ""}
               ${i.lank ? ` · <a href="${i.lank}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--green-700); font-weight:700;">🔗 Beställningssida</a>` : ""}
             </div>
+            ${i.anteckning ? `<div style="font-size:11px; color:var(--muted); margin-top:2px; font-style:italic;">${i.anteckning}</div>` : ""}
           </div>
           <button class="kr-delete" onclick="deleteInkop('${i.id}')" aria-label="Ta bort">✕</button>
         </div>
@@ -3796,7 +3797,7 @@ function renderInkopList() {
 }
 
 function openNewInkopModal() {
-  inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null };
+  inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null, anteckning: "" };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "inkop-new-overlay";
@@ -3820,6 +3821,10 @@ function openNewInkopModal() {
       <div class="field-group">
         <label class="field-label">Antal</label>
         <input class="field-input" type="number" inputmode="numeric" min="1" value="${inkopDraft.antal}" oninput="inkopDraft.antal = parseInt(this.value) || 1">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Anteckning (valfritt)</label>
+        <textarea class="field-input" id="inkop-anteckning-input" style="min-height:60px;" placeholder="T.ex. varför det behövs, hur bråttom det är..." oninput="inkopDraft.anteckning = this.value"></textarea>
       </div>
       <div id="inkop-new-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:8px 0;"></div>
       <button class="btn-primary" onclick="submitInkop()">Lägg till</button>
@@ -3886,7 +3891,7 @@ async function submitInkop() {
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("inkop").insert({
     vad: inkopDraft.vad.trim(), antal: inkopDraft.antal || 1, lank: inkopDraft.lank || "",
-    tilldelad_till: vald ? vald.tilldelad_till : null, created_by: user.id,
+    tilldelad_till: vald ? vald.tilldelad_till : null, anteckning: inkopDraft.anteckning || "", created_by: user.id,
   });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("inkop-new-overlay");
@@ -3952,6 +3957,10 @@ async function openInkopMallarModal() {
         <div style="font-size:11px; color:var(--muted); margin-top:4px;">Den personen får en notis så fort någon lägger en beställning på den här varan.</div>
       </div>
       <div class="field-group">
+        <label class="field-label">Anteckning (valfritt)</label>
+        <textarea class="field-input" id="inkop-mall-anteckning" style="min-height:60px;" placeholder="T.ex. särskilda instruktioner..."></textarea>
+      </div>
+      <div class="field-group">
         <label class="field-label">Bild (valfritt)</label>
         <input class="field-input" id="inkop-mall-bild" type="file" accept="image/*">
         <div style="font-size:11px; color:var(--muted); margin-top:4px;">Ta ett foto eller välj från bildbiblioteket — bra för att känna igen varan snabbt.</div>
@@ -3979,6 +3988,7 @@ function renderInkopMallarList() {
             <div style="font-weight:700;">${m.namn}</div>
             ${m.vnr ? `<div style="font-size:11px; color:var(--green-700); font-weight:700;">VNR ${m.vnr}</div>` : ""}
             ${m.lank ? `<div style="font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.lank}</div>` : ""}
+            ${m.anteckning ? `<div style="font-size:11px; color:var(--muted); margin-top:2px; font-style:italic;">${m.anteckning}</div>` : ""}
           </div>
           <button class="kr-edit" onclick="openEditInkopMallModal('${m.id}')" aria-label="Redigera">✎</button>
           <button class="kr-delete" onclick="deleteInkopMall('${m.id}')" aria-label="Ta bort">✕</button>
@@ -3992,6 +4002,7 @@ async function submitInkopMall() {
   const vnr = document.getElementById("inkop-mall-vnr").value.trim();
   const lank = document.getElementById("inkop-mall-lank").value.trim();
   const tilldelad_till = document.getElementById("inkop-mall-tilldelad").value || null;
+  const anteckning = document.getElementById("inkop-mall-anteckning").value.trim();
   const bildFile = document.getElementById("inkop-mall-bild").files[0];
   const errorBox = document.getElementById("inkop-mall-error");
   if (!namn) { errorBox.textContent = "Skriv ett namn."; return; }
@@ -4008,11 +4019,12 @@ async function submitInkopMall() {
   }
 
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("inkop_mallar").insert({ namn, vnr, lank, bild_url: bildUrl, tilldelad_till, created_by: user.id });
+  const { error } = await sb.from("inkop_mallar").insert({ namn, vnr, lank, bild_url: bildUrl, tilldelad_till, anteckning, created_by: user.id });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   document.getElementById("inkop-mall-namn").value = "";
   document.getElementById("inkop-mall-vnr").value = "";
   document.getElementById("inkop-mall-lank").value = "";
+  document.getElementById("inkop-mall-anteckning").value = "";
   document.getElementById("inkop-mall-bild").value = "";
   errorBox.textContent = "";
   await loadInkop();
@@ -4049,6 +4061,10 @@ function openEditInkopMallModal(id) {
         </select>
       </div>
       <div class="field-group">
+        <label class="field-label">Anteckning (valfritt)</label>
+        <textarea class="field-input" id="inkop-mall-edit-anteckning" style="min-height:60px;">${m.anteckning || ""}</textarea>
+      </div>
+      <div class="field-group">
         <label class="field-label">Bild (valfritt)</label>
         ${m.bild_url ? `<img src="${m.bild_url}" style="width:60px; height:60px; border-radius:10px; object-fit:cover; margin-bottom:6px;">` : ""}
         <input class="field-input" id="inkop-mall-edit-bild" type="file" accept="image/*">
@@ -4068,6 +4084,7 @@ async function saveInkopMallEdit(id) {
   const vnr = document.getElementById("inkop-mall-edit-vnr").value.trim();
   const lank = document.getElementById("inkop-mall-edit-lank").value.trim();
   const tilldelad_till = document.getElementById("inkop-mall-edit-tilldelad").value || null;
+  const anteckning = document.getElementById("inkop-mall-edit-anteckning").value.trim();
   const bildFile = document.getElementById("inkop-mall-edit-bild").files[0];
   const errorBox = document.getElementById("inkop-mall-edit-error");
   if (!namn) { errorBox.textContent = "Skriv ett namn."; return; }
@@ -4084,7 +4101,7 @@ async function saveInkopMallEdit(id) {
   }
 
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("inkop_mallar").update({ namn, vnr, lank, bild_url: bildUrl, tilldelad_till }).eq("id", id);
+  const { error } = await sb.from("inkop_mallar").update({ namn, vnr, lank, bild_url: bildUrl, tilldelad_till, anteckning }).eq("id", id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("inkop-mall-edit-overlay");
   if (overlay) overlay.remove();
@@ -6504,9 +6521,24 @@ function renderReklamationView() {
             <div style="font-size:11px; color:var(--muted); margin-top:2px;">${fmtSvShort(r.datum)} · ${r.medarbetare_signum}${r.arende_nummer ? ` · ${r.arende_nummer}` : ""}</div>
           </div>
           ${r.hanterad ? `<span class="org-badge" style="background:var(--green-100); color:var(--green-700);">Hanterad</span>` : `<span class="org-badge" style="background:#fde3c8; color:#b5590a;">Pågående</span>`}
+          ${isChef() ? `<button class="kr-delete" onclick="event.stopPropagation(); deleteReklamation('${r.id}')" aria-label="Ta bort">✕</button>` : ""}
         </div>
       `).join("")}</div>`
     : `<div class="empty-state">Inga ${reklamationTab === "avslutade" ? "avslutade" : "pågående"} reklamationer.</div>`;
+}
+
+function deleteReklamation(id) {
+  const r = reklamationCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort reklamation?",
+    `Reklamationen för <strong>${r ? r.varunamn : "varan"}</strong> tas bort permanent. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("reklamationer").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadReklamationer();
+      renderReklamationView();
+    }
+  );
 }
 
 function openNewReklamationModal() {
