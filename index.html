@@ -29,7 +29,31 @@
     --shadow-md: 0 6px 18px rgba(11,61,46,0.10);
     --shadow-lg: 0 10px 32px rgba(11,61,46,0.14);
     --font-display: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    /* Flerfärgad accentpalett — samma nyanser som genvägsikonerna redan
+       använder, återanvänds nu genomgående för ett sammanhängande,
+       levande färgspråk (bakgrund, headers, knappar). */
+    --accent-blue-a: #38bdf8; --accent-blue-b: #0284c7;
+    --accent-pink-a: #fb7185; --accent-pink-b: #e11d48;
+    --accent-purple-a: #a78bfa; --accent-purple-b: #7c3aed;
+    --accent-amber-a: #fbbf24; --accent-amber-b: #d97706;
+    --accent-teal-a: #2dd4bf; --accent-teal-b: #0d9488;
+    --body-gradient: linear-gradient(150deg, #e0f7ec 0%, #dff1fb 28%, #f1e9fd 55%, #fdeee0 80%, #dcf3e4 100%);
+    --topbar-gradient: linear-gradient(120deg, var(--accent-purple-b) 0%, var(--green-700) 48%, var(--accent-teal-b) 100%);
+    --btn-primary-gradient: linear-gradient(120deg, var(--green-600), var(--accent-teal-b));
   }
+  [data-theme="dark"] {
+    --green-100: rgba(52,211,153,0.16);
+    --green-050: rgba(52,211,153,0.09);
+    --white: #16211c;
+    --ink: #eaf6ef;
+    --muted: #93a89e;
+    --line: #26362f;
+    --shadow: 0 2px 10px rgba(0,0,0,0.35);
+    --shadow-md: 0 6px 18px rgba(0,0,0,0.4);
+    --shadow-lg: 0 10px 32px rgba(0,0,0,0.5);
+    --body-gradient: linear-gradient(160deg, #0d1420 0%, #1b1633 32%, #142229 66%, #0b1f18 100%);
+  }
+  [data-theme="dark"] body { background: var(--body-gradient); background-attachment: fixed; }
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
   }
@@ -37,7 +61,7 @@
   html, body { height: 100%; }
   body {
     margin: 0;
-    background: linear-gradient(160deg, #dcf3e4 0%, #eefaf1 40%, #c8e9d5 100%);
+    background: var(--body-gradient);
     background-attachment: fixed;
     color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -45,7 +69,7 @@
   }
   .app {
     max-width: 480px; margin: 0 auto; min-height: 100vh; background: var(--white); box-shadow: var(--shadow-lg);
-    position: relative; display: flex; flex-direction: column; overflow-x: hidden;
+    position: relative; display: flex; flex-direction: column;
   }
   /* Datoranpassning — bredare arbetsyta på större skärmar, telefon-layouten
      rörs inte alls under 768px bred skärm. */
@@ -61,18 +85,18 @@
     content: ""; position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; z-index: 0;
   }
   .app::before {
-    width: 260px; height: 260px; top: -80px; right: -100px;
+    width: 260px; height: 260px; top: -80px; right: 0;
     background: radial-gradient(circle, rgba(52,211,153,0.35), transparent 70%);
   }
   .app::after {
-    width: 300px; height: 300px; bottom: 10%; left: -120px;
+    width: 300px; height: 300px; bottom: 10%; left: 0;
     background: radial-gradient(circle, rgba(56,189,248,0.22), transparent 70%);
   }
   .app > * { position: relative; z-index: 1; }
 
   /* ---- Top bar ---- */
   .topbar {
-    background: linear-gradient(160deg, var(--green-600) 0%, var(--green-700) 55%, var(--green-900) 130%);
+    background: var(--topbar-gradient);
     color: var(--white);
     padding: 20px 20px 24px;
     border-radius: 0 0 22px 22px;
@@ -141,7 +165,7 @@
   .today-task-row.done span { text-decoration: line-through; color: var(--muted); }
   .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .nav-card {
-    background: linear-gradient(150deg, #ffffff, #d9f0e2);
+    background: linear-gradient(150deg, var(--white), var(--green-100));
     border: 1px solid var(--green-300);
     border-radius: 22px;
     padding: 18px 16px;
@@ -149,6 +173,12 @@
     cursor: pointer;
     box-shadow: 0 3px 14px rgba(11,61,46,0.07), 0 1px 2px rgba(11,61,46,0.05);
     transition: transform 0.15s cubic-bezier(0.2,0.8,0.3,1), box-shadow 0.15s ease;
+    position: relative; overflow: hidden;
+  }
+  .nav-card::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent-purple-a), var(--accent-blue-a), var(--accent-teal-a), var(--accent-amber-a), var(--accent-pink-a));
+  }
     text-align: left;
   }
   .nav-card:hover:not(.disabled) { transform: translateY(-3px); box-shadow: 0 12px 24px rgba(11,61,46,0.14); }
@@ -275,7 +305,7 @@
   .diff-box.off .diff-value { color: #b3261e; }
 
   .btn-primary {
-    width: 100%; background: linear-gradient(135deg, var(--green-600), var(--green-700)); color: var(--white); border: none; border-radius: 14px;
+    width: 100%; background: var(--btn-primary-gradient); color: var(--white); border: none; border-radius: 14px;
     padding: 14px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 4px;
     transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
     box-shadow: 0 4px 14px rgba(20,107,69,0.25);
@@ -446,6 +476,7 @@
   <!-- HOME VIEW -->
   <div id="view-home" style="display:none;">
     <div class="topbar">
+      <button class="logout-btn" id="theme-toggle-btn" onclick="toggleTheme()" style="right:100px; width:30px; height:30px; padding:0; display:flex; align-items:center; justify-content:center; font-size:15px; border-radius:50%;" aria-label="Byt tema">🌙</button>
       <button class="logout-btn" onclick="logout()">Logga ut</button>
       <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
         <div id="home-avatar-btn" onclick="showProfile()" style="cursor:pointer; width:52px; height:52px; border-radius:50%; border:2px solid rgba(255,255,255,0.6); background:rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:19px; font-weight:700; color:#fff; flex-shrink:0;">
@@ -760,6 +791,28 @@
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
+// ============================================================
+// TEMA — ljust/mörkt läge, kom ihåg valet mellan besök.
+// ============================================================
+function applyStoredTheme() {
+  const stored = localStorage.getItem("apotek-theme");
+  const theme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+  const btn = document.getElementById("theme-toggle-btn");
+  if (btn) btn.textContent = theme === "dark" ? "☀️" : "🌙";
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || "light";
+  const next = current === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("apotek-theme", next);
+  const btn = document.getElementById("theme-toggle-btn");
+  if (btn) btn.textContent = next === "dark" ? "☀️" : "🌙";
+}
+
+applyStoredTheme();
+
 // ============================================================
 // SUPABASE-KONFIGURATION — fyll i dessa två efter att du skapat
 // ditt Supabase-projekt (Project Settings → API).
@@ -6521,7 +6574,7 @@ function renderReklamationView() {
             <div style="font-size:11px; color:var(--muted); margin-top:2px;">${fmtSvShort(r.datum)} · ${r.medarbetare_signum}${r.arende_nummer ? ` · ${r.arende_nummer}` : ""}</div>
           </div>
           ${r.hanterad ? `<span class="org-badge" style="background:var(--green-100); color:var(--green-700);">Hanterad</span>` : `<span class="org-badge" style="background:#fde3c8; color:#b5590a;">Pågående</span>`}
-          ${isChef() ? `<button class="kr-delete" onclick="event.stopPropagation(); deleteReklamation('${r.id}')" aria-label="Ta bort">✕</button>` : ""}
+          ${canDeleteReklamation() ? `<button class="kr-delete" onclick="event.stopPropagation(); deleteReklamation('${r.id}')" aria-label="Ta bort">✕</button>` : ""}
         </div>
       `).join("")}</div>`
     : `<div class="empty-state">Inga ${reklamationTab === "avslutade" ? "avslutade" : "pågående"} reklamationer.</div>`;
@@ -6690,6 +6743,12 @@ async function submitReklamation() {
 
 function canEditReklamation(r) {
   if (!r.hanterad) return true;
+  const user = getCurrentUser();
+  if (!user) return false;
+  return user.role === "chef" || (user.roll_funktioner || []).includes("VA");
+}
+
+function canDeleteReklamation() {
   const user = getCurrentUser();
   if (!user) return false;
   return user.role === "chef" || (user.roll_funktioner || []).includes("VA");
