@@ -530,6 +530,8 @@
 
         <div id="nav-card-kundmote"></div>
 
+        <div id="nav-card-moten"></div>
+
         <div id="nav-card-users"></div>
 
         <div class="nav-card" onclick="showFranvaro()">
@@ -765,6 +767,17 @@
       <div class="title">Kundmöte</div>
     </div>
     <div class="kassa-content" id="kundmote-results"></div>
+  </div>
+
+  <!-- MÖTEN VIEW -->
+  <div id="view-moten" style="display:none;">
+    <div class="topbar with-back">
+      <button class="back-btn" id="moten-back-btn" onclick="motenBack()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="title" id="moten-title">Möten</div>
+    </div>
+    <div class="kassa-content" id="moten-results"></div>
   </div>
 
   <!-- LEDIGHETSANSÖKAN VIEW -->
@@ -1097,6 +1110,7 @@ async function logout() {
   document.getElementById("view-lager").style.display = "none";
   document.getElementById("view-kvalitet").style.display = "none";
   document.getElementById("view-kundmote").style.display = "none";
+  document.getElementById("view-moten").style.display = "none";
   document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-login").style.display = "block";
   await renderLoginScreen();
@@ -1292,6 +1306,19 @@ async function renderHomeForUser(user) {
         </div>
         <div class="nav-label">Kundmöte</div>
         <div class="nav-sub">MYS m.m.</div>
+      </div>
+    `;
+  }
+
+  const motenCardWrap = document.getElementById("nav-card-moten");
+  if (motenCardWrap) {
+    motenCardWrap.innerHTML = `
+      <div class="nav-card" onclick="showMoten()">
+        <div class="nav-icon nav-icon-c5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 9H21" stroke="currentColor" stroke-width="1.7"/><path d="M8 2V6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 2V6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">Möten</div>
+        <div class="nav-sub">Anteckningar & uppföljning</div>
       </div>
     `;
   }
@@ -2307,6 +2334,7 @@ async function showHome() {
   document.getElementById("view-lager").style.display = "none";
   document.getElementById("view-kvalitet").style.display = "none";
   document.getElementById("view-kundmote").style.display = "none";
+  document.getElementById("view-moten").style.display = "none";
   document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-home").style.display = "block";
   window.scrollTo(0, 0);
@@ -3730,6 +3758,7 @@ async function ensureAterkommandeUppgifterFinns() {
 
 async function loadTaskAssignments() {
   await ensureAterkommandeUppgifterFinns();
+  await cleanupGamlaUppgifter();
   const [profilesRes, tasksRes] = await Promise.all([
     fetchProfiles(),
     sb.from("tilldelade_uppgifter").select("*").order("deadline", { ascending: true }),
@@ -3738,6 +3767,19 @@ async function loadTaskAssignments() {
   const alla = tasksRes.data || [];
   taskAssignCache = alla.filter(t => !t.aterkommande); // bara faktiska instanser, inte mallarna själva
   aterkommandeMallarCache = alla.filter(t => t.aterkommande);
+}
+
+let uppgifterStadadeDatum = null; // dagens ISO-datum, senast städat denna session
+async function cleanupGamlaUppgifter() {
+  const idagIso = isoDate(new Date());
+  if (uppgifterStadadeDatum === idagIso) return; // redan städat idag, denna session
+  const gransDatum = new Date();
+  gransDatum.setMonth(gransDatum.getMonth() - 1);
+  // Rensar bara AVKLARADE, faktiska instanser äldre än en månad — rör
+  // aldrig ogjorda uppgifter eller själva de återkommande mallarna.
+  await sb.from("tilldelade_uppgifter").delete()
+    .eq("is_done", true).eq("aterkommande", false).lt("deadline", isoDate(gransDatum));
+  uppgifterStadadeDatum = idagIso;
 }
 
 /* ---- Reklamation ---- */
@@ -5746,6 +5788,13 @@ function renderKundmoteHub() {
         <div class="nav-label">MYS</div>
         <div class="nav-sub">Mystery Shopper</div>
       </div>
+      <div class="nav-card" onclick="showNps()">
+        <div class="nav-icon nav-icon-c4">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 19L9 12L13 15L20 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="nav-label">NPS</div>
+        <div class="nav-sub">Kundnöjdhet</div>
+      </div>
     </div>
   `;
 }
@@ -5916,6 +5965,541 @@ function deleteMysResultat(id) {
       if (error) { alert("Kunde inte ta bort: " + error.message); return; }
       await loadMysResultat();
       renderMysContent();
+    }
+  );
+}
+
+/* ---- NPS (Net Promoter Score) ---- */
+let npsCache = [];
+const NPS_FORKLARING = `
+  <div style="background:var(--green-050); border:1px solid var(--green-300); border-radius:14px; padding:14px; font-size:12.5px; line-height:1.5;">
+    <div style="font-weight:800; margin-bottom:6px;">Så fungerar NPS</div>
+    <div>Måttet bygger på en enda kärnfråga som ställs till kunden:</div>
+    <div style="font-style:italic; margin:6px 0;">"Hur sannolikt är det att du skulle rekommendera oss till en vän eller kollega?"</div>
+    <div style="margin-bottom:6px;">Kunden svarar på en skala från 0 (inte alls sannolikt) till 10 (mycket sannolikt). Utifrån svaren delas kunderna in i tre grupper:</div>
+    <ul style="margin:0 0 8px 18px; padding:0;">
+      <li><strong>Ambassadörer (betyg 9–10):</strong> Lojala entusiaster som sprider gott omdöme och driver tillväxt.</li>
+      <li><strong>Passiva (betyg 7–8):</strong> Nöjda men likgiltiga kunder som är sårbara för konkurrenter.</li>
+      <li><strong>Kritiker (betyg 0–6):</strong> Missnöjda kunder som kan skada varumärkets rykte.</li>
+    </ul>
+    <div>Ditt totala NPS-resultat beräknas genom att ta andelen ambassadörer (procent) minus andelen kritiker (procent). Resultatet hamnar mellan -100 och +100.</div>
+  </div>
+`;
+
+function npsFarg(resultat) {
+  if (resultat < 0) return { bg: "#fdecec", text: "#b3261e", stapel: "#e57373" };
+  if (resultat <= 70) return { bg: "#fff3d6", text: "#b5590a", stapel: "#f0c14b" };
+  return { bg: "var(--green-100)", text: "var(--green-700)", stapel: "#4caf82" };
+}
+
+async function showNps() {
+  kundmoteSection = "nps";
+  await loadNpsResultat();
+  renderNpsView();
+}
+
+async function loadNpsResultat() {
+  const { data, error } = await sb.from("nps_resultat").select("*").order("ar", { ascending: true }).order("manad", { ascending: true });
+  npsCache = error ? [] : data;
+}
+
+function renderNpsView() {
+  const container = document.getElementById("kundmote-results");
+  container.innerHTML = `
+    <button class="btn-primary" onclick="openNewNpsModal()">Registrera nytt NPS-resultat</button>
+    <div class="kassa-section-title" style="margin-top:20px;">Senaste 10 mätningarna</div>
+    <div id="nps-chart" style="margin-bottom:14px;"></div>
+    <div class="kassa-section-title">Alla mätningar</div>
+    <div id="nps-list" style="margin-bottom:18px;"></div>
+    ${NPS_FORKLARING}
+  `;
+  document.getElementById("nps-chart").innerHTML = npsChartHtml(npsCache.slice(-10));
+  renderNpsList();
+}
+
+function npsChartHtml(rader) {
+  if (!rader.length) return `<div class="empty-state">Inga mätningar registrerade ännu.</div>`;
+  const bredd = 320, hojd = 170, padding = 24;
+  const barBredd = (bredd - padding * 2) / rader.length;
+  const nollY = hojd - padding - ((0 + 100) / 200) * (hojd - padding * 2);
+  const staplar = rader.map((r, i) => {
+    const f = npsFarg(r.resultat);
+    const barTopp = hojd - padding - ((r.resultat + 100) / 200) * (hojd - padding * 2);
+    const y = Math.min(barTopp, nollY);
+    const barHojd = Math.abs(nollY - barTopp);
+    const x = padding + i * barBredd + barBredd * 0.15;
+    const w = barBredd * 0.7;
+    return `
+      <rect x="${x}" y="${y}" width="${w}" height="${Math.max(barHojd, 1)}" rx="3" fill="${f.stapel}"></rect>
+      <text x="${x + w / 2}" y="${barTopp < nollY ? y - 4 : y + barHojd + 11}" font-size="9" text-anchor="middle" fill="var(--ink)" font-weight="700">${r.resultat}</text>
+      <text x="${x + w / 2}" y="${hojd - 8}" font-size="7.5" text-anchor="middle" fill="var(--muted)">${MYS_MANADSNAMN[r.manad].slice(0, 3)} ${String(r.ar).slice(2)}</text>
+    `;
+  }).join("");
+  const linje70Y = hojd - padding - ((70 + 100) / 200) * (hojd - padding * 2);
+  return `
+    <svg viewBox="0 0 ${bredd} ${hojd}" style="width:100%; height:auto; background:var(--white); border:1px solid var(--line); border-radius:14px;">
+      <line x1="${padding}" y1="${nollY}" x2="${bredd - padding}" y2="${nollY}" stroke="var(--line)" stroke-width="1"></line>
+      <line x1="${padding}" y1="${linje70Y}" x2="${bredd - padding}" y2="${linje70Y}" stroke="#4caf82" stroke-width="0.75" stroke-dasharray="3,3"></line>
+      ${staplar}
+    </svg>
+    <div style="display:flex; gap:12px; justify-content:center; margin-top:6px; font-size:10px; color:var(--muted);">
+      <span>🔴 Under 0</span><span>🟡 0–70</span><span>🟢 Över 70</span>
+    </div>
+  `;
+}
+
+function renderNpsList() {
+  const wrap = document.getElementById("nps-list");
+  const sorterad = [...npsCache].sort((a, b) => b.ar - a.ar || b.manad - a.manad);
+  wrap.innerHTML = sorterad.length
+    ? `<div class="kassa-row-list">${sorterad.map(r => {
+        const f = npsFarg(r.resultat);
+        return `
+        <div class="kassa-row" style="cursor:default;">
+          <div style="flex:1;">${MYS_MANADSNAMN[r.manad]} ${r.ar}</div>
+          <span class="org-badge" style="background:${f.bg}; color:${f.text}; font-weight:800; font-size:11px; padding:4px 10px;">${r.resultat}</span>
+          ${isChef() ? `<button class="kr-delete" onclick="deleteNpsResultat('${r.id}')" aria-label="Ta bort">✕</button>` : ""}
+        </div>
+      `;
+      }).join("")}</div>`
+    : `<div class="empty-state">Inga mätningar registrerade ännu.</div>`;
+}
+
+let npsDraft = { manad: new Date().getMonth() + 1, ar: new Date().getFullYear(), resultat: "" };
+
+function openNewNpsModal() {
+  npsDraft = { manad: new Date().getMonth() + 1, ar: new Date().getFullYear(), resultat: "" };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "nps-new-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Registrera NPS-resultat</div>
+      <div class="field-group">
+        <label class="field-label">Månad</label>
+        <select class="field-input" id="nps-manad-select" onchange="npsDraft.manad = parseInt(this.value)">
+          ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${npsDraft.manad === m ? "selected" : ""}>${MYS_MANADSNAMN[m]}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">År</label>
+        <input class="field-input" id="nps-ar-input" type="number" value="${npsDraft.ar}" oninput="npsDraft.ar = parseInt(this.value)">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Resultat (-100 till 100)</label>
+        <input class="field-input" id="nps-resultat-input" type="number" min="-100" max="100" placeholder="T.ex. 42" oninput="npsDraft.resultat = this.value">
+      </div>
+      <div id="nps-new-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitNpsResultat()">Spara</button>
+      <button class="btn-secondary" onclick="document.getElementById('nps-new-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function submitNpsResultat() {
+  const errorBox = document.getElementById("nps-new-error");
+  const resultat = num(npsDraft.resultat);
+  if (npsDraft.resultat === "" || isNaN(resultat)) { errorBox.textContent = "Fyll i ett resultat."; return; }
+  if (resultat < -100 || resultat > 100) { errorBox.textContent = "Resultatet måste vara mellan -100 och 100."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("nps_resultat").insert({ manad: npsDraft.manad, ar: npsDraft.ar, resultat, created_by: user.id });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("nps-new-overlay");
+  if (overlay) overlay.remove();
+  await loadNpsResultat();
+  renderNpsView();
+}
+
+function deleteNpsResultat(id) {
+  confirmDelete(
+    "Ta bort mätning?",
+    "NPS-resultatet tas bort permanent. Det går inte att ångra.",
+    async () => {
+      const { error } = await sb.from("nps_resultat").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadNpsResultat();
+      renderNpsView();
+    }
+  );
+}
+
+/* ---- Möten ---- */
+const MOTE_KATEGORIER = ["Resultat & Nyckeltal", "Hjärtats arbetssätt", "Kompetensutveckling", "Aktuellt", "Lokal", "HR", "Drift", "Kvalitet", "Lokala Vinnare"];
+const MOTE_KATEGORI_FARG = {
+  "Resultat & Nyckeltal": { bg: "#e3f2fd", text: "#0277bd" },
+  "Hjärtats arbetssätt": { bg: "var(--green-100)", text: "var(--green-700)" },
+  "Kompetensutveckling": { bg: "#f3e8ff", text: "#7c3aed" },
+  "Aktuellt": { bg: "#fff3d6", text: "#b5590a" },
+  "Lokal": { bg: "#e0fbf7", text: "#0d9488" },
+  "HR": { bg: "#ffe4ec", text: "#e11d48" },
+  "Drift": { bg: "#e3f2fd", text: "#0277bd" },
+  "Kvalitet": { bg: "var(--green-100)", text: "var(--green-700)" },
+  "Lokala Vinnare": { bg: "#fff3d6", text: "#b5590a" },
+};
+const MOTE_STATUS_LABEL = { ej_klart: "Ej klart", igang: "Igång", klart: "Klart", ej_aktuellt: "Ej aktuellt" };
+const MOTE_STATUS_FARG = {
+  ej_klart: { bg: "#fdecec", text: "#b3261e" },
+  igang: { bg: "#fff3d6", text: "#b5590a" },
+  klart: { bg: "var(--green-100)", text: "var(--green-700)" },
+  ej_aktuellt: { bg: "var(--line)", text: "var(--muted)" },
+};
+
+let motenSection = "list";
+let motenCache = [];
+let aktivMote = null;
+let moteAktiviteterCache = [];
+let motenAllaProfiler = [];
+
+async function showMoten() {
+  document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-moten").style.display = "block";
+  motenSection = "list";
+  document.getElementById("moten-title").textContent = "Möten";
+  motenAllaProfiler = await fetchProfiles();
+  await loadMoten();
+  renderMotenListView();
+}
+
+function motenBack() {
+  if (motenSection === "detail") {
+    motenSection = "list";
+    document.getElementById("moten-title").textContent = "Möten";
+    renderMotenListView();
+    return;
+  }
+  showHome();
+}
+
+async function loadMoten() {
+  const { data, error } = await sb.from("moten").select("*").order("datum", { ascending: false });
+  motenCache = error ? [] : data;
+}
+
+function renderMotenListView() {
+  const container = document.getElementById("moten-results");
+  container.innerHTML = `
+    <button class="btn-primary" onclick="openNyttMoteModal()">+ Nytt möte</button>
+    <div class="kassa-row-list" style="margin-top:16px;">
+      ${motenCache.length ? motenCache.map(m => `
+        <div class="kassa-row" onclick="openMote('${m.id}')">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700;">${m.titel}</div>
+            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${fmtSvFull(m.datum)}</div>
+          </div>
+        </div>
+      `).join("") : `<div class="empty-state">Inga möten skapade ännu.</div>`}
+    </div>
+  `;
+}
+
+let nyttMoteDraft = { titel: "", datum: isoDate(new Date()) };
+function openNyttMoteModal() {
+  nyttMoteDraft = { titel: "", datum: isoDate(new Date()) };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "nytt-mote-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Nytt möte</div>
+      <div class="field-group">
+        <label class="field-label">Titel</label>
+        <input class="field-input" id="nytt-mote-titel" type="text" placeholder="T.ex. Månadsmöte september" oninput="nyttMoteDraft.titel = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Datum</label>
+        <button type="button" class="field-input kassa-date-btn" id="nytt-mote-datum-btn" onclick="openNyttMoteDatePicker()">${fmtSvFull(nyttMoteDraft.datum)}</button>
+      </div>
+      <div id="nytt-mote-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitNyttMote()">Skapa möte</button>
+      <button class="btn-secondary" onclick="document.getElementById('nytt-mote-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function openNyttMoteDatePicker() {
+  openGenericDatePicker(
+    () => nyttMoteDraft.datum,
+    (iso) => { nyttMoteDraft.datum = iso; document.getElementById("nytt-mote-datum-btn").textContent = fmtSvFull(iso); }
+  );
+}
+
+async function submitNyttMote() {
+  const errorBox = document.getElementById("nytt-mote-error");
+  if (!nyttMoteDraft.titel.trim()) { errorBox.textContent = "Skriv en titel för mötet."; return; }
+  const user = getCurrentUser();
+  const titel = nyttMoteDraft.titel.trim();
+  const datum = nyttMoteDraft.datum;
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("moten").insert({ titel, datum, created_by: user.id });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("nytt-mote-overlay");
+  if (overlay) overlay.remove();
+  await loadMoten();
+  const nyttMote = motenCache.find(m => m.titel === titel && m.datum === datum && m.created_by === user.id);
+  if (nyttMote) await openMote(nyttMote.id);
+  else renderMotenListView();
+}
+
+async function openMote(id) {
+  aktivMote = motenCache.find(m => m.id === id) || (await sb.from("moten").select("*").eq("id", id).single()).data;
+  motenSection = "detail";
+  document.getElementById("moten-title").textContent = aktivMote.titel;
+  await loadMoteAktiviteter(id);
+  renderMoteDetailView();
+}
+
+async function loadMoteAktiviteter(moteId) {
+  const { data, error } = await sb.from("mote_aktiviteter").select("*").eq("mote_id", moteId).order("created_at", { ascending: true });
+  moteAktiviteterCache = error ? [] : data;
+}
+
+function renderMoteDetailView() {
+  const container = document.getElementById("moten-results");
+  container.innerHTML = `
+    <div style="font-size:12.5px; color:var(--muted); margin-bottom:14px;">${fmtSvFull(aktivMote.datum)}</div>
+    <button class="btn-primary" onclick="openNyAktivitetModal()">+ Ny aktivitet</button>
+    <div class="kassa-row-list" style="margin-top:16px;">
+      ${moteAktiviteterCache.length ? moteAktiviteterCache.map(a => {
+        const kf = MOTE_KATEGORI_FARG[a.kategori] || { bg: "var(--line)", text: "var(--muted)" };
+        const sf = MOTE_STATUS_FARG[a.status];
+        const ansvarigaNamn = (a.ansvariga || []).map(uid => { const p = motenAllaProfiler.find(x => x.id === uid); return p ? p.name : null; }).filter(Boolean);
+        return `
+        <div class="kassa-row" style="align-items:flex-start; flex-wrap:wrap; cursor:pointer;" onclick="openAktivitetDetail('${a.id}')">
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:4px;">
+              <span class="org-badge" style="background:${kf.bg}; color:${kf.text};">${a.kategori}</span>
+              <span class="org-badge" style="background:${sf.bg}; color:${sf.text}; font-weight:800;">${MOTE_STATUS_LABEL[a.status]}</span>
+            </div>
+            <div style="font-size:13.5px; font-weight:700;">${a.aktivitet}</div>
+            <div style="font-size:11px; color:var(--muted); margin-top:3px;">
+              ${ansvarigaNamn.length ? `👤 ${ansvarigaNamn.join(", ")}` : "Ingen ansvarig"}${a.deadline ? ` · Deadline: ${fmtSvShort(a.deadline)}` : ""}
+            </div>
+          </div>
+        </div>
+      `;
+      }).join("") : `<div class="empty-state">Inga aktiviteter tillagda ännu.</div>`}
+    </div>
+  `;
+}
+
+let nyAktivitetDraft = null;
+function emptyAktivitetDraft() {
+  return { kategori: MOTE_KATEGORIER[0], aktivitet: "", ansvariga: [], deadline: isoDate(new Date()), status: "ej_klart" };
+}
+
+function openNyAktivitetModal() {
+  nyAktivitetDraft = emptyAktivitetDraft();
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "ny-aktivitet-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Ny aktivitet</div><div id="ny-aktivitet-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderNyAktivitetBody();
+}
+
+function renderNyAktivitetBody() {
+  const d = nyAktivitetDraft;
+  const wrap = document.getElementById("ny-aktivitet-body");
+  wrap.innerHTML = `
+    <div class="field-group">
+      <label class="field-label">Kategori</label>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        ${MOTE_KATEGORIER.map(k => `
+          <button type="button" onclick="nyAktivitetDraft.kategori = '${k}'; renderNyAktivitetBody();"
+            style="padding:7px 12px; border-radius:999px; border:2px solid ${d.kategori === k ? "var(--green-700)" : "var(--line)"}; background:${d.kategori === k ? "var(--green-050)" : "var(--white)"}; cursor:pointer; font-size:11.5px; font-weight:700;">${k}</button>
+        `).join("")}
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Aktivitet</label>
+      <textarea class="field-input" id="aktivitet-text" style="min-height:70px;" placeholder="Vad ska göras?" oninput="nyAktivitetDraft.aktivitet = this.value">${d.aktivitet}</textarea>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Ansvarig</label>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-size:11px; color:var(--muted);">Välj en, flera, eller alla</span>
+        <a href="#" onclick="event.preventDefault(); toggleAllaAktivitetAnsvariga();" style="font-size:11px; font-weight:700; color:var(--green-700);">${d.ansvariga.length === motenAllaProfiler.length ? "Avmarkera alla" : "Markera alla"}</a>
+      </div>
+      <div style="max-height:160px; overflow-y:auto; border:1px solid var(--line); border-radius:12px; padding:6px;">
+        ${motenAllaProfiler.map(p => `
+          <label class="kassa-check-row">
+            <input type="checkbox" ${d.ansvariga.includes(p.id) ? "checked" : ""} onchange="toggleAktivitetAnsvarig('${p.id}')">
+            <span class="kassa-check-name" style="font-weight:400;">${p.name}</span>
+          </label>
+        `).join("")}
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Deadline</label>
+      <button type="button" class="field-input kassa-date-btn" onclick="openAktivitetDeadlinePicker()">${fmtSvFull(d.deadline)}</button>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Status</label>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        ${Object.keys(MOTE_STATUS_LABEL).map(s => `
+          <button type="button" onclick="nyAktivitetDraft.status = '${s}'; renderNyAktivitetBody();"
+            style="flex:1; min-width:45%; padding:9px; border-radius:12px; border:2px solid ${d.status === s ? "var(--green-700)" : "var(--line)"}; background:${d.status === s ? "var(--green-050)" : "var(--white)"}; cursor:pointer; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;">
+            <span style="width:8px; height:8px; border-radius:50%; background:${MOTE_STATUS_FARG[s].text};"></span>${MOTE_STATUS_LABEL[s]}
+          </button>
+        `).join("")}
+      </div>
+    </div>
+    <div id="ny-aktivitet-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:8px 0;"></div>
+    <button class="btn-primary" onclick="submitNyAktivitet()">Spara aktivitet</button>
+    <button class="btn-secondary" onclick="document.getElementById('ny-aktivitet-overlay').remove()">Avbryt</button>
+  `;
+}
+
+function toggleAktivitetAnsvarig(userId) {
+  const idx = nyAktivitetDraft.ansvariga.indexOf(userId);
+  if (idx === -1) nyAktivitetDraft.ansvariga.push(userId);
+  else nyAktivitetDraft.ansvariga.splice(idx, 1);
+  renderNyAktivitetBody();
+}
+
+function toggleAllaAktivitetAnsvariga() {
+  nyAktivitetDraft.ansvariga = nyAktivitetDraft.ansvariga.length === motenAllaProfiler.length ? [] : motenAllaProfiler.map(p => p.id);
+  renderNyAktivitetBody();
+}
+
+function openAktivitetDeadlinePicker() {
+  openGenericDatePicker(
+    () => nyAktivitetDraft.deadline,
+    (iso) => { nyAktivitetDraft.deadline = iso; renderNyAktivitetBody(); }
+  );
+}
+
+async function submitNyAktivitet() {
+  const d = nyAktivitetDraft;
+  const errorBox = document.getElementById("ny-aktivitet-error");
+  if (!d.aktivitet.trim()) { errorBox.textContent = "Skriv vad aktiviteten gäller."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("mote_aktiviteter").insert({
+    mote_id: aktivMote.id, kategori: d.kategori, aktivitet: d.aktivitet.trim(),
+    ansvariga: d.ansvariga, deadline: d.deadline, status: d.status, created_by: user.id,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("ny-aktivitet-overlay");
+  if (overlay) overlay.remove();
+  await loadMoteAktiviteter(aktivMote.id);
+  renderMoteDetailView();
+}
+
+let aktivitetDetaljStatusDraft = null;
+async function openAktivitetDetail(id) {
+  const a = moteAktiviteterCache.find(x => x.id === id);
+  if (!a) return;
+  aktivitetDetaljStatusDraft = a.status;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "aktivitet-detalj-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  const kf = MOTE_KATEGORI_FARG[a.kategori] || { bg: "var(--line)", text: "var(--muted)" };
+  const ansvarigaNamn = (a.ansvariga || []).map(uid => { const p = motenAllaProfiler.find(x => x.id === uid); return p ? p.name : null; }).filter(Boolean);
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <span class="org-badge" style="background:${kf.bg}; color:${kf.text};">${a.kategori}</span>
+      <div style="font-size:15px; font-weight:700; margin:8px 0;">${a.aktivitet}</div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:14px;">
+        ${ansvarigaNamn.length ? `👤 ${ansvarigaNamn.join(", ")}` : "Ingen ansvarig"}${a.deadline ? ` · Deadline: ${fmtSvShort(a.deadline)}` : ""}
+      </div>
+
+      <div class="kassa-section-title">Uppdatera status</div>
+      <div id="aktivitet-status-picker" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;"></div>
+      <div class="field-group">
+        <label class="field-label">Kommentar (valfritt)</label>
+        <textarea class="field-input" id="aktivitet-kommentar-text" style="min-height:60px;" placeholder="Vad har hänt sedan sist?"></textarea>
+      </div>
+      <div id="aktivitet-kommentar-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitAktivitetKommentar('${a.id}')">Spara uppdatering</button>
+
+      <div class="kassa-section-title" style="margin-top:20px;">Historik</div>
+      <div id="aktivitet-kommentar-list"></div>
+
+      ${isChef() ? `<button class="btn-secondary" style="margin-top:16px; color:#b3261e;" onclick="deleteAktivitet('${a.id}')">Ta bort aktivitet</button>` : ""}
+      <button class="btn-secondary" onclick="document.getElementById('aktivitet-detalj-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  renderAktivitetStatusPicker();
+  await renderAktivitetKommentarList(a.id);
+}
+
+function renderAktivitetStatusPicker() {
+  const wrap = document.getElementById("aktivitet-status-picker");
+  if (!wrap) return;
+  wrap.innerHTML = Object.keys(MOTE_STATUS_LABEL).map(s => `
+    <button type="button" onclick="aktivitetDetaljStatusDraft = '${s}'; renderAktivitetStatusPicker();"
+      style="flex:1; min-width:45%; padding:9px; border-radius:12px; border:2px solid ${aktivitetDetaljStatusDraft === s ? "var(--green-700)" : "var(--line)"}; background:${aktivitetDetaljStatusDraft === s ? "var(--green-050)" : "var(--white)"}; cursor:pointer; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;">
+      <span style="width:8px; height:8px; border-radius:50%; background:${MOTE_STATUS_FARG[s].text};"></span>${MOTE_STATUS_LABEL[s]}
+    </button>
+  `).join("");
+}
+
+async function renderAktivitetKommentarList(aktivitetId) {
+  const wrap = document.getElementById("aktivitet-kommentar-list");
+  if (!wrap) return;
+  const { data } = await sb.from("mote_aktivitet_kommentar").select("*").eq("aktivitet_id", aktivitetId).order("created_at", { ascending: false });
+  const kommentarer = data || [];
+  wrap.innerHTML = kommentarer.length
+    ? `<div class="kassa-row-list">${kommentarer.map(k => `
+        <div class="kassa-row" style="cursor:default; align-items:flex-start;">
+          <div style="flex:1; min-width:0;">
+            ${k.ny_status ? `<span class="org-badge" style="background:${MOTE_STATUS_FARG[k.ny_status].bg}; color:${MOTE_STATUS_FARG[k.ny_status].text}; font-weight:800; margin-bottom:4px;">→ ${MOTE_STATUS_LABEL[k.ny_status]}</span>` : ""}
+            ${k.kommentar ? `<div style="font-size:12.5px; margin-top:2px;">${k.kommentar}</div>` : ""}
+            <div style="font-size:10.5px; color:var(--muted); margin-top:3px;">${k.signum} · ${fmtSvShort(isoDate(new Date(k.created_at)))} ${fmtTime(new Date(k.created_at))}</div>
+          </div>
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">Ingen historik ännu.</div>`;
+}
+
+async function submitAktivitetKommentar(aktivitetId) {
+  const kommentar = document.getElementById("aktivitet-kommentar-text").value.trim();
+  const errorBox = document.getElementById("aktivitet-kommentar-error");
+  const a = moteAktiviteterCache.find(x => x.id === aktivitetId);
+  const statusChanged = a && aktivitetDetaljStatusDraft !== a.status;
+  if (!kommentar && !statusChanged) { errorBox.textContent = "Skriv en kommentar eller ändra status."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+
+  const { error: kommentarError } = await sb.from("mote_aktivitet_kommentar").insert({
+    aktivitet_id: aktivitetId, kommentar: kommentar || (statusChanged ? `Status ändrad till "${MOTE_STATUS_LABEL[aktivitetDetaljStatusDraft]}"` : ""),
+    ny_status: statusChanged ? aktivitetDetaljStatusDraft : null, signum: user.signum, created_by: user.id,
+  });
+  if (kommentarError) { errorBox.textContent = "Kunde inte spara: " + kommentarError.message; return; }
+
+  if (statusChanged) {
+    const { error: statusError } = await sb.from("mote_aktiviteter").update({ status: aktivitetDetaljStatusDraft }).eq("id", aktivitetId);
+    if (statusError) { errorBox.textContent = "Kunde inte uppdatera status: " + statusError.message; return; }
+  }
+
+  document.getElementById("aktivitet-kommentar-text").value = "";
+  errorBox.textContent = "";
+  await loadMoteAktiviteter(aktivMote.id);
+  renderMoteDetailView();
+  await renderAktivitetKommentarList(aktivitetId);
+}
+
+function deleteAktivitet(id) {
+  const a = moteAktiviteterCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort aktivitet?",
+    `<strong>${a ? a.aktivitet : "Aktiviteten"}</strong> tas bort permanent, inklusive all historik. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("mote_aktiviteter").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      const overlay = document.getElementById("aktivitet-detalj-overlay");
+      if (overlay) overlay.remove();
+      await loadMoteAktiviteter(aktivMote.id);
+      renderMoteDetailView();
     }
   );
 }
@@ -7032,6 +7616,7 @@ function renderTasksView() {
 
   const listHtml = sorted.length ? sorted.map(t => {
     const profile = taskAssignAllProfiles.find(p => p.id === t.target_user_id);
+    const avklaradAvProfil = t.avklarad_av ? taskAssignAllProfiles.find(p => p.id === t.avklarad_av) : null;
     const overdue = isOverdue(t);
     return `
       <div class="kassa-row" style="align-items:flex-start; flex-wrap:wrap; ${overdue ? "background:#fdecec;" : ""}">
@@ -7044,6 +7629,7 @@ function renderTasksView() {
             <span style="font-size:11px; color:${overdue ? "#b3261e" : "var(--muted)"}; font-weight:${overdue ? "700" : "400"};">Deadline: ${fmtSvShort(t.deadline)}</span>
           </div>
           <div style="font-size:13.5px; margin-top:3px; ${t.is_done ? "text-decoration:line-through; color:var(--muted);" : ""}">${t.text}</div>
+          ${(!t.target_user_id && t.is_done && avklaradAvProfil) ? `<div style="font-size:11px; color:var(--green-700); font-weight:700; margin-top:2px;">✓ Avbockad av ${avklaradAvProfil.name}</div>` : ""}
         </div>
         ${chef ? `<button class="kr-delete" onclick="deleteTaskAssignment('${t.id}')" aria-label="Ta bort">✕</button>` : ""}
       </div>
@@ -7108,14 +7694,16 @@ function deleteAterkommandeMall(id) {
 }
 
 async function toggleTaskAssignmentDone(id, checked) {
-  const { error } = await sb.from("tilldelade_uppgifter").update({ is_done: checked }).eq("id", id);
+  const user = getCurrentUser();
+  const { error } = await sb.from("tilldelade_uppgifter").update({ is_done: checked, avklarad_av: checked ? user.id : null }).eq("id", id);
   if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
   await loadTaskAssignments();
   renderTasksView();
 }
 
 async function completePinnedTask(id, checked) {
-  const { error } = await sb.from("tilldelade_uppgifter").update({ is_done: checked }).eq("id", id);
+  const user = getCurrentUser();
+  const { error } = await sb.from("tilldelade_uppgifter").update({ is_done: checked, avklarad_av: checked ? user.id : null }).eq("id", id);
   if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
   await renderTodayWidget(getCurrentUser());
 }
@@ -7533,6 +8121,7 @@ async function renderTodayWidget(user) {
   // en efter en, vilket är den största hastighetsvinsten.
   const allProfilesForToday = await fetchProfiles();
   await ensureAterkommandeUppgifterFinns();
+  await cleanupGamlaUppgifter();
 
   const [
     ,
