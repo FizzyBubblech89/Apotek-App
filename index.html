@@ -476,6 +476,7 @@
   <!-- HOME VIEW -->
   <div id="view-home" style="display:none;">
     <div class="topbar">
+      <button class="logout-btn" onclick="showSearch()" style="right:140px; width:30px; height:30px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; border-radius:50%;" aria-label="Sök">🔍</button>
       <button class="logout-btn" id="theme-toggle-btn" onclick="toggleTheme()" style="right:100px; width:30px; height:30px; padding:0; display:flex; align-items:center; justify-content:center; font-size:15px; border-radius:50%;" aria-label="Byt tema">🌙</button>
       <button class="logout-btn" onclick="logout()">Logga ut</button>
       <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
@@ -778,6 +779,22 @@
       <div class="title" id="moten-title">Möten</div>
     </div>
     <div class="kassa-content" id="moten-results"></div>
+  </div>
+
+  <!-- SÖK VIEW -->
+  <div id="view-search" style="display:none;">
+    <div class="topbar with-back">
+      <button class="back-btn" onclick="showHome()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="title">Sök</div>
+    </div>
+    <div class="kassa-content">
+      <div class="field-group">
+        <input class="field-input" id="global-sok-input" type="text" placeholder="Sök i hela appen..." oninput="performGlobalSearch(this.value)">
+      </div>
+      <div id="global-sok-results"></div>
+    </div>
   </div>
 
   <!-- LEDIGHETSANSÖKAN VIEW -->
@@ -1111,6 +1128,7 @@ async function logout() {
   document.getElementById("view-kvalitet").style.display = "none";
   document.getElementById("view-kundmote").style.display = "none";
   document.getElementById("view-moten").style.display = "none";
+  document.getElementById("view-search").style.display = "none";
   document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-login").style.display = "block";
   await renderLoginScreen();
@@ -1796,6 +1814,7 @@ async function fetchUnseenFeedbackCount() {
 }
 
 let ideasTab = "aktiva"; // "aktiva" (ny + pågående) | "hanterade"
+let ideasSokterm = "";
 
 async function showIdeas() {
   document.getElementById("view-home").style.display = "none";
@@ -1876,12 +1895,14 @@ function renderIdeasList() {
   }
 
   const relevant = isChefView ? ideasCache : ideasCache.filter(i => i.user_id === user.id);
-  const filtered = isChefView ? relevant.filter(i => ideasTab === "hanterade" ? i.handled : !i.handled) : relevant;
+  const tabFiltered = isChefView ? relevant.filter(i => ideasTab === "hanterade" ? i.handled : !i.handled) : relevant;
+  const sokLower = ideasSokterm.trim().toLowerCase();
+  const filtered = sokLower ? tabFiltered.filter(i => i.text.toLowerCase().includes(sokLower)) : tabFiltered;
   const listHtml = filtered.map(i => ideaRowHtml(i, isChefView)).join("");
 
   listWrap.innerHTML = listHtml
     ? `<div class="kassa-row-list">${listHtml}</div>`
-    : `<div class="empty-state">${isChefView ? (ideasTab === "hanterade" ? "Inga hanterade idéer ännu." : "Inga nya eller pågående idéer.") : "Inga idéer skickade ännu."}</div>`;
+    : `<div class="empty-state">${sokLower ? "Inga idéer matchar sökningen." : (isChefView ? (ideasTab === "hanterade" ? "Inga hanterade idéer ännu." : "Inga nya eller pågående idéer.") : "Inga idéer skickade ännu.")}</div>`;
 }
 
 async function renderIdeasView() {
@@ -1921,6 +1942,9 @@ async function renderIdeasView() {
         <button id="ideas-tab-hanterade" onclick="setIdeasTab('hanterade')">Hanterade</button>
       </div>
     ` : `<div class="kassa-section-title" style="margin-top:24px;">Mina idéer</div>`}
+    <div class="field-group" style="margin-top:10px;">
+      <input class="field-input" id="ideas-sok" type="text" placeholder="🔍 Sök bland idéer..." value="${ideasSokterm}" oninput="ideasSokterm = this.value; renderIdeasList();">
+    </div>
     <div id="ideas-list-wrap"></div>
   `;
   renderIdeasList();
@@ -2335,6 +2359,7 @@ async function showHome() {
   document.getElementById("view-kvalitet").style.display = "none";
   document.getElementById("view-kundmote").style.display = "none";
   document.getElementById("view-moten").style.display = "none";
+  document.getElementById("view-search").style.display = "none";
   document.getElementById("view-ledighet").style.display = "none";
   document.getElementById("view-home").style.display = "block";
   window.scrollTo(0, 0);
@@ -6262,7 +6287,10 @@ function renderMoteDetailView() {
   const container = document.getElementById("moten-results");
   container.innerHTML = `
     <div style="font-size:12.5px; color:var(--muted); margin-bottom:14px;">${fmtSvFull(aktivMote.datum)}</div>
-    <button class="btn-primary" onclick="openNyAktivitetModal()">+ Ny aktivitet</button>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-primary" style="flex:1;" onclick="openNyAktivitetModal()">+ Ny aktivitet</button>
+      <button class="btn-secondary" onclick="exportMotePdf('${aktivMote.id}')">📄 PDF</button>
+    </div>
     <div class="kassa-row-list" style="margin-top:16px;">
       ${moteAktiviteterCache.length ? moteAktiviteterCache.map(a => {
         const kf = MOTE_KATEGORI_FARG[a.kategori] || { bg: "var(--line)", text: "var(--muted)" };
@@ -6502,6 +6530,138 @@ function deleteAktivitet(id) {
       renderMoteDetailView();
     }
   );
+}
+
+async function exportMotePdf(moteId) {
+  if (!window.jspdf) { alert("PDF-biblioteket kunde inte laddas."); return; }
+  const mote = motenCache.find(m => m.id === moteId) || aktivMote;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 18;
+
+  doc.setFontSize(16);
+  doc.text(mote.titel, 14, y); y += 7;
+  doc.setFontSize(10);
+  doc.setTextColor(120);
+  doc.text(fmtSvFull(mote.datum), 14, y); y += 10;
+  doc.setTextColor(0);
+
+  if (!moteAktiviteterCache.length) {
+    doc.setFontSize(10);
+    doc.text("Inga aktiviteter registrerade på det här mötet.", 14, y);
+  }
+
+  for (const a of moteAktiviteterCache) {
+    const ansvarigaNamn = (a.ansvariga || []).map(uid => { const p = motenAllaProfiler.find(x => x.id === uid); return p ? p.name : null; }).filter(Boolean);
+    const { data: kommentarer } = await sb.from("mote_aktivitet_kommentar").select("*").eq("aktivitet_id", a.id).order("created_at", { ascending: true });
+
+    if (y > 260) { doc.addPage(); y = 20; }
+
+    doc.setFontSize(11);
+    doc.setFont(undefined, "bold");
+    const aktivitetRader = doc.splitTextToSize(a.aktivitet, pageWidth - 28);
+    doc.text(aktivitetRader, 14, y); y += aktivitetRader.length * 5 + 1;
+
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(20, 107, 69);
+    doc.text(`${a.kategori} · ${MOTE_STATUS_LABEL[a.status]}`, 14, y); y += 4.5;
+    doc.setTextColor(0);
+    doc.text(`Ansvarig: ${ansvarigaNamn.length ? ansvarigaNamn.join(", ") : "Ingen"}${a.deadline ? " · Deadline: " + fmtSvShort(a.deadline) : ""}`, 14, y); y += 5.5;
+
+    if (kommentarer && kommentarer.length) {
+      doc.setFontSize(8.5);
+      doc.setTextColor(90);
+      kommentarer.forEach(k => {
+        if (y > 275) { doc.addPage(); y = 20; }
+        const rad = `${k.signum}, ${fmtSvShort(isoDate(new Date(k.created_at)))}: ${k.kommentar}`;
+        const kommentarRader = doc.splitTextToSize(rad, pageWidth - 32);
+        doc.text(kommentarRader, 18, y); y += kommentarRader.length * 3.8 + 1.5;
+      });
+      doc.setTextColor(0);
+    }
+    y += 4;
+  }
+
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  doc.text(`Exporterad ${fmtSvFull(isoDate(new Date()))}`, 14, 290);
+
+  doc.save(`mote-${mote.titel.toLowerCase().replace(/å/g, "a").replace(/ä/g, "a").replace(/ö/g, "o").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}-${mote.datum}.pdf`);
+}
+
+/* ---- Global sök ---- */
+let globalSokTimeout = null;
+
+function showSearch() {
+  document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-search").style.display = "block";
+  const input = document.getElementById("global-sok-input");
+  input.value = "";
+  document.getElementById("global-sok-results").innerHTML = "";
+  setTimeout(() => input.focus(), 50);
+}
+
+function performGlobalSearch(query) {
+  clearTimeout(globalSokTimeout);
+  const trimmed = query.trim();
+  const resultsWrap = document.getElementById("global-sok-results");
+  if (!trimmed) { resultsWrap.innerHTML = ""; return; }
+  if (trimmed.length < 2) { resultsWrap.innerHTML = `<div class="empty-state">Skriv minst 2 tecken.</div>`; return; }
+  resultsWrap.innerHTML = `<div class="empty-state">Söker…</div>`;
+  globalSokTimeout = setTimeout(() => runGlobalSearch(trimmed), 300);
+}
+
+async function runGlobalSearch(query) {
+  const resultsWrap = document.getElementById("global-sok-results");
+  const like = `%${query}%`;
+
+  const [ideerRes, reklamRes, inkopRes, mallarRes, moteAktRes, lagerRes, uppgRes, lankRes, profilRes] = await Promise.all([
+    sb.from("ideer").select("*").ilike("text", like).limit(6),
+    sb.from("reklamationer").select("*").ilike("varunamn", like).limit(6),
+    sb.from("inkop").select("*").ilike("vad", like).limit(6),
+    sb.from("inkop_mallar").select("*").ilike("namn", like).limit(6),
+    sb.from("mote_aktiviteter").select("*").ilike("aktivitet", like).limit(6),
+    sb.from("lageravvikelser").select("*").ilike("fritext", like).limit(6),
+    sb.from("tilldelade_uppgifter").select("*").ilike("text", like).limit(6),
+    sb.from("snabblankar").select("*").ilike("namn", like).limit(6),
+    sb.from("profiles").select("*").or(`name.ilike.${like},signum.ilike.${like}`).limit(6),
+  ]);
+
+  const grupper = [
+    { titel: "Idéer", icon: "💡", data: ideerRes.data || [], text: r => r.text, action: () => showIdeas() },
+    { titel: "Reklamationer", icon: "📦", data: reklamRes.data || [], text: r => r.varunamn, action: () => showReklamation() },
+    { titel: "Inköp", icon: "🛒", data: inkopRes.data || [], text: r => r.vad, action: () => showInkop() },
+    { titel: "Vanliga varor", icon: "📋", data: mallarRes.data || [], text: r => r.namn, action: () => showInkop() },
+    { titel: "Möten", icon: "📅", data: moteAktRes.data || [], text: r => r.aktivitet, action: (r) => showMoten().then(() => openMote(r.mote_id)) },
+    { titel: "Lageravvikelser", icon: "📉", data: lagerRes.data || [], text: r => r.fritext || r.vnr || "VNR " + r.vnr, action: () => showLagerAvvikelser() },
+    { titel: "Uppgifter", icon: "✅", data: uppgRes.data || [], text: r => r.text, action: () => showTasks() },
+    { titel: "Övrigt", icon: "🔗", data: lankRes.data || [], text: r => r.namn, action: () => showOvrigt() },
+    { titel: "Personer", icon: "👤", data: profilRes.data || [], text: r => r.name, action: () => showUsers() },
+  ].filter(g => g.data.length);
+
+  if (!grupper.length) { resultsWrap.innerHTML = `<div class="empty-state">Inga träffar för "${query}".</div>`; return; }
+
+  resultsWrap.innerHTML = grupper.map((g, gi) => `
+    <div class="kassa-section-title" style="margin-top:${gi === 0 ? "10px" : "20px"};">${g.icon} ${g.titel}</div>
+    <div class="kassa-row-list">
+      ${g.data.map((r, ri) => `
+        <div class="kassa-row" onclick="globalSokGaTill(${gi}, ${ri})">
+          <div style="flex:1; min-width:0; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${g.text(r)}</div>
+        </div>
+      `).join("")}
+    </div>
+  `).join("");
+
+  globalSokGrupperCache = grupper;
+}
+
+let globalSokGrupperCache = [];
+function globalSokGaTill(gi, ri) {
+  const grupp = globalSokGrupperCache[gi];
+  const rad = grupp.data[ri];
+  grupp.action(rad);
 }
 
 async function showKampanj() {
