@@ -3696,14 +3696,14 @@ function deleteTraning(id, titel) {
 }
 
 /* ---- Tilldela uppgift (riktad uppgift mot en person, med deadline + prioritet) ---- */
-const PRIORITET_LABEL = { rod: "Hög prioritet", gul: "Mellan prioritet", gron: "Låg prioritet" };
+const PRIORITET_LABEL = { rod: "Hög prioritet", gul: "Mellan prioritet", gron: "Låg prioritet", ingen: "Ingen prioritet" };
 let taskAssignCache = [];
 let taskAssignAllProfiles = [];
 let taskAssignDraft = null;
 let aterkommandeMallarCache = [];
 
 function emptyTaskAssignDraft() {
-  return { targetUserId: "", text: "", deadline: isoDate(new Date()), prioritet: "gul", tillAlla: false, aterkommande: false, veckodag: 1 };
+  return { targetUserId: "", text: "", deadline: isoDate(new Date()), prioritet: "gul", tillAlla: false, aterkommande: false, veckodagar: [1] };
 }
 
 let aterkommandeUppgifterKollade = null; // veckans måndags-ISO, senast kontrollerad denna session
@@ -6964,11 +6964,14 @@ function renderTasksView() {
     </div>
     ${d.aterkommande ? `
       <div class="field-group">
-        <label class="field-label">Vilken veckodag</label>
-        <select class="field-input" id="task-veckodag" onchange="taskAssignDraft.veckodag = parseInt(this.value)">
-          ${[1,2,3,4,5,6,7].map(v => `<option value="${v}" ${d.veckodag === v ? "selected" : ""}>${VECKODAGAR[v]}</option>`).join("")}
-        </select>
-        <div style="font-size:11px; color:var(--muted); margin-top:4px;">Uppgiften skapas automatiskt på nytt varje vecka, den valda veckodagen.</div>
+        <label class="field-label">Vilka veckodagar</label>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${[1,2,3,4,5,6,7].map(v => `
+            <button type="button" onclick="toggleTaskVeckodag(${v})"
+              style="flex:1; min-width:42px; padding:9px 4px; border-radius:10px; border:2px solid ${d.veckodagar.includes(v) ? "var(--green-700)" : "var(--line)"}; background:${d.veckodagar.includes(v) ? "var(--green-050)" : "var(--white)"}; cursor:pointer; font-size:11px; font-weight:700;">${VECKODAGAR[v].slice(0, 3)}</button>
+          `).join("")}
+        </div>
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">Uppgiften skapas automatiskt på nytt varje vecka, de valda veckodagarna — och syns bara den dagen den faktiskt gäller.</div>
       </div>
     ` : `
       <div class="field-group">
@@ -6980,17 +6983,19 @@ function renderTasksView() {
       <label class="field-label">Uppgift</label>
       <textarea class="field-input" id="task-text" style="min-height:70px;" placeholder="Vad ska göras?" oninput="taskAssignDraft.text = this.value">${d.text}</textarea>
     </div>
-    <div class="field-group">
-      <label class="field-label">Prioritet</label>
-      <div style="display:flex; gap:8px;">
-        ${["rod", "gul", "gron"].map(p => `
-          <button type="button" onclick="taskAssignDraft.prioritet = '${p}'; renderTasksView();"
-            style="flex:1; padding:10px; border-radius:12px; border:2px solid ${d.prioritet === p ? "var(--green-700)" : "var(--line)"}; background:${d.prioritet === p ? "var(--green-050)" : "var(--white)"}; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12.5px; font-weight:700;">
-            <span class="priority-dot ${p}"></span>${PRIORITET_LABEL[p]}
-          </button>
-        `).join("")}
+    ${!d.aterkommande ? `
+      <div class="field-group">
+        <label class="field-label">Prioritet</label>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          ${["rod", "gul", "gron", "ingen"].map(p => `
+            <button type="button" onclick="taskAssignDraft.prioritet = '${p}'; renderTasksView();"
+              style="flex:1; min-width:45%; padding:10px; border-radius:12px; border:2px solid ${d.prioritet === p ? "var(--green-700)" : "var(--line)"}; background:${d.prioritet === p ? "var(--green-050)" : "var(--white)"}; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12.5px; font-weight:700;">
+              ${p !== "ingen" ? `<span class="priority-dot ${p}"></span>` : ""}${PRIORITET_LABEL[p]}
+            </button>
+          `).join("")}
+        </div>
       </div>
-    </div>
+    ` : ""}
     <div id="task-form-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:10px 0 8px;"></div>
     <button class="btn-primary" onclick="submitTaskAssignment()">Tilldela uppgift</button>
 
@@ -7013,13 +7018,14 @@ function renderTasksView() {
     ` : ""}
   ` : "";
 
-  const relevant = chef ? taskAssignCache : taskAssignCache.filter(t => t.target_user_id === user.id || t.target_user_id === null);
   const todayIsoForTasks = isoDate(new Date());
+  const relevant = (chef ? taskAssignCache : taskAssignCache.filter(t => t.target_user_id === user.id || t.target_user_id === null))
+    .filter(t => !t.mall_id || t.deadline === todayIsoForTasks || t.is_done); // återkommande instanser syns bara sin egen dag (avklarade visas ändå kvar tills de städas bort naturligt)
   const isOverdue = (t) => !t.is_done && t.deadline < todayIsoForTasks;
   const sorted = [...relevant].sort((a, b) => {
     if (a.is_done !== b.is_done) return a.is_done ? 1 : -1;
     if (isOverdue(a) !== isOverdue(b)) return isOverdue(a) ? -1 : 1;
-    const order = { rod: 0, gul: 1, gron: 2 };
+    const order = { rod: 0, gul: 1, gron: 2, ingen: 3 };
     if (order[a.prioritet] !== order[b.prioritet]) return order[a.prioritet] - order[b.prioritet];
     return a.deadline.localeCompare(b.deadline);
   });
@@ -7032,7 +7038,7 @@ function renderTasksView() {
         <input type="checkbox" ${t.is_done ? "checked" : ""} onchange="toggleTaskAssignmentDone('${t.id}', this.checked)" style="margin-top:2px;">
         <div style="flex:1; min-width:0; margin-left:8px;">
           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-            <span class="priority-badge ${t.prioritet}"><span class="priority-dot ${t.prioritet}"></span>${PRIORITET_LABEL[t.prioritet]}</span>
+            ${(!t.mall_id && t.prioritet !== "ingen") ? `<span class="priority-badge ${t.prioritet}"><span class="priority-dot ${t.prioritet}"></span>${PRIORITET_LABEL[t.prioritet]}</span>` : ""}
             ${overdue ? `<span class="org-badge" style="background:#b3261e; color:var(--white); font-weight:800;">⏰ Försenad</span>` : ""}
             ${chef ? `<span style="font-size:11px; color:var(--muted);">${t.target_user_id ? (profile ? profile.name : "Okänd") : "👥 Alla"}</span>` : ""}
             <span style="font-size:11px; color:${overdue ? "#b3261e" : "var(--muted)"}; font-weight:${overdue ? "700" : "400"};">Deadline: ${fmtSvShort(t.deadline)}</span>
@@ -7051,6 +7057,14 @@ function renderTasksView() {
   `;
 }
 
+function toggleTaskVeckodag(dag) {
+  const idx = taskAssignDraft.veckodagar.indexOf(dag);
+  if (idx === -1) taskAssignDraft.veckodagar.push(dag);
+  else if (taskAssignDraft.veckodagar.length > 1) taskAssignDraft.veckodagar.splice(idx, 1); // minst en dag måste alltid vara vald
+  taskAssignDraft.veckodagar.sort((a, b) => a - b);
+  renderTasksView();
+}
+
 async function submitTaskAssignment() {
   const d = taskAssignDraft;
   const errorBox = document.getElementById("task-form-error");
@@ -7061,12 +7075,13 @@ async function submitTaskAssignment() {
   errorBox.textContent = "Sparar…";
 
   if (d.aterkommande) {
-    const { error } = await sb.from("tilldelade_uppgifter").insert({
+    const rader = d.veckodagar.map(veckodag => ({
       target_user_id: targetUserId, text: d.text.trim(), prioritet: d.prioritet, created_by: user.id,
-      aterkommande: true, veckodag: d.veckodag, deadline: null,
-    });
+      aterkommande: true, veckodag, deadline: null,
+    }));
+    const { error } = await sb.from("tilldelade_uppgifter").insert(rader);
     if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
-    aterkommandeUppgifterKollade = null; // tvinga fram en ny kontroll så den nya mallen genererar sin instans direkt
+    aterkommandeUppgifterKollade = null; // tvinga fram en ny kontroll så de nya mallarna genererar sina instanser direkt
   } else {
     const { error } = await sb.from("tilldelade_uppgifter").insert({
       target_user_id: targetUserId, text: d.text.trim(), deadline: d.deadline, prioritet: d.prioritet, created_by: user.id,
@@ -7660,7 +7675,7 @@ async function renderTodayWidget(user) {
       </div>
     `);
   });
-  (myPinnedTasks || []).filter(t => !isNotisSnoozed(`task-${t.id}`)).forEach(t => {
+  (myPinnedTasks || []).filter(t => !isNotisSnoozed(`task-${t.id}`)).filter(t => !t.mall_id || t.deadline === todayIso).forEach(t => {
     const overdue = t.deadline < todayIso;
     noticeBlocks.push(`
       <div style="display:flex; align-items:flex-start; gap:6px; background:${overdue ? "#fdecec" : t.prioritet === "rod" ? "#fdecec" : t.prioritet === "gul" ? "#fff3d6" : "var(--green-050)"}; border:1px solid ${overdue ? "#b3261e" : t.prioritet === "rod" ? "#f3b9b9" : t.prioritet === "gul" ? "#f0dba3" : "var(--green-300)"}; border-radius:10px; padding:6px 8px; margin-bottom:4px;">
