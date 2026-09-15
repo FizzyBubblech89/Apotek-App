@@ -1236,10 +1236,11 @@ async function renderHomeForUser(user) {
   }
 
   const isChef = user.role === "chef";
-  const [ideaBadgeCount, kassaFlaggedRes, tasksCountRes] = await Promise.all([
+  const [ideaBadgeCount, kassaFlaggedRes, tasksCountRes, unseenUtbildningCount] = await Promise.all([
     isChef ? fetchUnhandledIdeaCount() : fetchUnseenFeedbackCount(),
     isChef ? sb.from("kassaredovisningar").select("id, kassadifferens").eq("granskad", false) : Promise.resolve({ data: [] }),
     !isChef ? sb.from("tilldelade_uppgifter").select("id").eq("target_user_id", user.id).eq("is_done", false) : Promise.resolve({ data: [] }),
+    fetchUnseenUtbildningCount(),
   ]);
 
   const ideasCardWrap = document.getElementById("nav-card-ideas");
@@ -1429,12 +1430,12 @@ async function renderHomeForUser(user) {
   const utbildningarCardWrap = document.getElementById("nav-card-utbildningar");
   if (utbildningarCardWrap) {
     utbildningarCardWrap.innerHTML = `
-      <div class="nav-card" onclick="showUtbildningar()">
+      <div class="nav-card ${unseenUtbildningCount > 0 ? "nav-card-alert" : ""}" onclick="showUtbildningar()">
         <div class="nav-icon nav-icon-c4">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M2 8L12 3L22 8L12 13L2 8Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M6 10.5V16C6 16 8.5 18 12 18C15.5 18 18 16 18 16V10.5" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
         </div>
         <div class="nav-label">Utbildningar</div>
-        <div class="nav-sub">Anmälan & information</div>
+        <div class="nav-sub">${unseenUtbildningCount > 0 ? `${unseenUtbildningCount} ny${unseenUtbildningCount === 1 ? "" : "a"}` : "Anmälan & information"}</div>
       </div>
     `;
   }
@@ -1982,6 +1983,17 @@ async function fetchUnhandledIdeaCount() {
   const { data, error } = await sb.from("ideer").select("id").eq("handled", false);
   if (error) { console.error(error); return 0; }
   return data.length;
+}
+
+async function fetchUnseenUtbildningCount() {
+  const user = getCurrentUser();
+  if (!user) return 0;
+  const [allaRes, seddaRes] = await Promise.all([
+    sb.from("utbildningar").select("id"),
+    sb.from("utbildning_sedd").select("utbildning_id").eq("user_id", user.id),
+  ]);
+  const seddaIds = (seddaRes.data || []).map(s => s.utbildning_id);
+  return (allaRes.data || []).filter(u => !seddaIds.includes(u.id)).length;
 }
 
 async function fetchUnseenFeedbackCount() {
@@ -7428,7 +7440,18 @@ async function showUtbildningar() {
   utbildningarTab = "aktuella";
   utbildningarAllaProfiler = await fetchProfiles();
   await loadUtbildningar();
+  await markUtbildningarSomSedda();
   renderUtbildningarView();
+}
+
+async function markUtbildningarSomSedda() {
+  const user = getCurrentUser();
+  if (!user) return;
+  const { data: sedda } = await sb.from("utbildning_sedd").select("utbildning_id").eq("user_id", user.id);
+  const seddaIds = (sedda || []).map(s => s.utbildning_id);
+  const osedda = utbildningarCache.filter(u => !seddaIds.includes(u.id));
+  if (!osedda.length) return;
+  await Promise.all(osedda.map(u => sb.from("utbildning_sedd").insert({ utbildning_id: u.id, user_id: user.id, signum: user.signum })));
 }
 
 async function loadUtbildningar() {
@@ -7485,6 +7508,7 @@ function renderUtbildningarView() {
             </label>
             <div style="font-size:11px; color:var(--muted); margin-top:4px;">${deltagare.length} anmäld${deltagare.length === 1 ? "" : "a"}${deltagareNamn.length ? `: ${deltagareNamn.join(", ")}` : ""}</div>
           </div>
+          <button class="kr-edit" onclick="openEditUtbildningModal('${u.id}')" aria-label="Redigera">✎</button>
           ${isChef() ? `<button class="kr-delete" onclick="deleteUtbildning('${u.id}')" aria-label="Ta bort">✕</button>` : ""}
         </div>
       `;
@@ -7569,6 +7593,77 @@ async function submitNyUtbildning() {
   });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("ny-utbildning-overlay");
+  if (overlay) overlay.remove();
+  await loadUtbildningar();
+  await markUtbildningarSomSedda();
+  renderUtbildningarView();
+}
+
+let editUtbildningDraft = null;
+function openEditUtbildningModal(id) {
+  const u = utbildningarCache.find(x => x.id === id);
+  if (!u) return;
+  editUtbildningDraft = { id, namn: u.namn, datum: u.datum, lank_eller_mail: u.lank_eller_mail || "", anmalan_deadline: u.anmalan_deadline || isoDate(new Date()), fritext: u.fritext || "" };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "edit-utbildning-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Redigera utbildning</div>
+      <div class="field-group">
+        <label class="field-label">Namn på utbildning</label>
+        <input class="field-input" id="edit-utbildning-namn" type="text" value="${u.namn}" oninput="editUtbildningDraft.namn = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Datum</label>
+        <button type="button" class="field-input kassa-date-btn" id="edit-utbildning-datum-btn" onclick="openEditUtbildningDatumPicker()">${fmtSvFull(editUtbildningDraft.datum)}</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Länk eller mail till anmälan (valfritt)</label>
+        <input class="field-input" id="edit-utbildning-lank" type="text" value="${u.lank_eller_mail || ""}" oninput="editUtbildningDraft.lank_eller_mail = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Sista anmälningsdag (valfritt)</label>
+        <button type="button" class="field-input kassa-date-btn" id="edit-utbildning-deadline-btn" onclick="openEditUtbildningDeadlinePicker()">${fmtSvFull(editUtbildningDraft.anmalan_deadline)}</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Beskrivning (valfritt)</label>
+        <textarea class="field-input" id="edit-utbildning-fritext" style="min-height:70px;" oninput="editUtbildningDraft.fritext = this.value">${u.fritext || ""}</textarea>
+      </div>
+      <div id="edit-utbildning-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="saveEditUtbildning()">Spara ändringar</button>
+      <button class="btn-secondary" onclick="document.getElementById('edit-utbildning-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function openEditUtbildningDatumPicker() {
+  openGenericDatePicker(
+    () => editUtbildningDraft.datum,
+    (iso) => { editUtbildningDraft.datum = iso; document.getElementById("edit-utbildning-datum-btn").textContent = fmtSvFull(iso); }
+  );
+}
+
+function openEditUtbildningDeadlinePicker() {
+  openGenericDatePicker(
+    () => editUtbildningDraft.anmalan_deadline,
+    (iso) => { editUtbildningDraft.anmalan_deadline = iso; document.getElementById("edit-utbildning-deadline-btn").textContent = fmtSvFull(iso); }
+  );
+}
+
+async function saveEditUtbildning() {
+  const errorBox = document.getElementById("edit-utbildning-error");
+  if (!editUtbildningDraft.namn.trim()) { errorBox.textContent = "Skriv ett namn på utbildningen."; return; }
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("utbildningar").update({
+    namn: editUtbildningDraft.namn.trim(), datum: editUtbildningDraft.datum,
+    lank_eller_mail: editUtbildningDraft.lank_eller_mail.trim(), anmalan_deadline: editUtbildningDraft.anmalan_deadline,
+    fritext: editUtbildningDraft.fritext.trim(),
+  }).eq("id", editUtbildningDraft.id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("edit-utbildning-overlay");
   if (overlay) overlay.remove();
   await loadUtbildningar();
   renderUtbildningarView();
