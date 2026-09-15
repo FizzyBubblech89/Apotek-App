@@ -7471,8 +7471,8 @@ function setUtbildningarTab(tab) {
 function renderUtbildningarView() {
   const container = document.getElementById("utbildningar-results");
   const todayIso = isoDate(new Date());
-  const aktuella = utbildningarCache.filter(u => u.datum >= todayIso);
-  const tidigare = utbildningarCache.filter(u => u.datum < todayIso);
+  const aktuella = utbildningarCache.filter(u => (u.slutdatum || u.datum) >= todayIso);
+  const tidigare = utbildningarCache.filter(u => (u.slutdatum || u.datum) < todayIso);
   const list = utbildningarTab === "tidigare" ? tidigare : aktuella;
 
   container.innerHTML = `
@@ -7498,7 +7498,7 @@ function renderUtbildningarView() {
         <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-wrap:wrap;">
           <div style="flex:1; min-width:0;">
             <div style="font-weight:700; font-size:14px;">${u.namn}</div>
-            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">📅 ${fmtSvFull(u.datum)}</div>
+            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">📅 ${(u.slutdatum && u.slutdatum !== u.datum) ? `${fmtSvFull(u.datum)} – ${fmtSvFull(u.slutdatum)}` : fmtSvFull(u.datum)}</div>
             ${u.anmalan_deadline ? `<div style="font-size:11.5px; color:var(--muted); margin-top:2px;">Sista anmälningsdag: ${fmtSvShort(u.anmalan_deadline)}</div>` : ""}
             ${u.fritext ? `<div style="font-size:13px; margin-top:6px; white-space:pre-wrap;">${u.fritext}</div>` : ""}
             ${u.lank_eller_mail ? `<div style="margin-top:6px;">${lankArHttp ? `<a href="${u.lank_eller_mail}" target="_blank" rel="noopener" style="color:var(--green-700); font-weight:700; font-size:12.5px;">🔗 Till anmälan</a>` : lankArMail ? `<a href="mailto:${u.lank_eller_mail}" style="color:var(--green-700); font-weight:700; font-size:12.5px;">✉️ ${u.lank_eller_mail}</a>` : `<span style="font-size:12.5px;">${u.lank_eller_mail}</span>`}</div>` : ""}
@@ -7529,48 +7529,83 @@ async function toggleUtbildningDeltagande(utbildningId, checked) {
   renderUtbildningarView();
 }
 
-let nyUtbildningDraft = { namn: "", datum: isoDate(new Date()), lank_eller_mail: "", anmalan_deadline: isoDate(new Date()), fritext: "" };
+let nyUtbildningDraft = { namn: "", datum: isoDate(new Date()), slutdatum: null, lank_eller_mail: "", anmalan_deadline: isoDate(new Date()), fritext: "" };
 function openNyUtbildningModal() {
-  nyUtbildningDraft = { namn: "", datum: isoDate(new Date()), lank_eller_mail: "", anmalan_deadline: isoDate(new Date()), fritext: "" };
+  nyUtbildningDraft = { namn: "", datum: isoDate(new Date()), slutdatum: null, lank_eller_mail: "", anmalan_deadline: isoDate(new Date()), fritext: "" };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "ny-utbildning-overlay";
   overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `
-    <div class="kassa-modal-card">
-      <div class="kassa-modal-title">Ny utbildning</div>
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Ny utbildning</div><div id="ny-utbildning-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderNyUtbildningBody();
+}
+
+function renderNyUtbildningBody() {
+  const d = nyUtbildningDraft;
+  const wrap = document.getElementById("ny-utbildning-body");
+  wrap.innerHTML = `
       <div class="field-group">
         <label class="field-label">Namn på utbildning</label>
-        <input class="field-input" id="utbildning-namn" type="text" placeholder="T.ex. HLR-utbildning" oninput="nyUtbildningDraft.namn = this.value">
+        <input class="field-input" id="utbildning-namn" type="text" placeholder="T.ex. HLR-utbildning" value="${d.namn}" oninput="nyUtbildningDraft.namn = this.value">
       </div>
       <div class="field-group">
-        <label class="field-label">Datum</label>
-        <button type="button" class="field-input kassa-date-btn" id="utbildning-datum-btn" onclick="openUtbildningDatumPicker()">${fmtSvFull(nyUtbildningDraft.datum)}</button>
+        <label class="field-label">${d.slutdatum ? "Startdatum" : "Datum"}</label>
+        <button type="button" class="field-input kassa-date-btn" id="utbildning-datum-btn" onclick="openUtbildningDatumPicker()">${fmtSvFull(d.datum)}</button>
       </div>
+      <div class="field-group">
+        <label class="kassa-check-row" style="border:1px solid var(--line); border-radius:12px;">
+          <input type="checkbox" ${d.slutdatum ? "checked" : ""} onchange="toggleUtbildningFlerdagar(this.checked)">
+          <span class="kassa-check-name" style="font-weight:400;">Flera dagar</span>
+        </label>
+      </div>
+      ${d.slutdatum ? `
+        <div class="field-group">
+          <label class="field-label">Slutdatum</label>
+          <button type="button" class="field-input kassa-date-btn" id="utbildning-slutdatum-btn" onclick="openUtbildningSlutdatumPicker()">${fmtSvFull(d.slutdatum)}</button>
+        </div>
+      ` : ""}
       <div class="field-group">
         <label class="field-label">Länk eller mail till anmälan (valfritt)</label>
-        <input class="field-input" id="utbildning-lank" type="text" placeholder="https://... eller namn@exempel.se" oninput="nyUtbildningDraft.lank_eller_mail = this.value">
+        <input class="field-input" id="utbildning-lank" type="text" placeholder="https://... eller namn@exempel.se" value="${d.lank_eller_mail}" oninput="nyUtbildningDraft.lank_eller_mail = this.value">
       </div>
       <div class="field-group">
         <label class="field-label">Sista anmälningsdag (valfritt)</label>
-        <button type="button" class="field-input kassa-date-btn" id="utbildning-deadline-btn" onclick="openUtbildningDeadlinePicker()">${fmtSvFull(nyUtbildningDraft.anmalan_deadline)}</button>
+        <button type="button" class="field-input kassa-date-btn" id="utbildning-deadline-btn" onclick="openUtbildningDeadlinePicker()">${fmtSvFull(d.anmalan_deadline)}</button>
       </div>
       <div class="field-group">
         <label class="field-label">Beskrivning (valfritt)</label>
-        <textarea class="field-input" id="utbildning-fritext" style="min-height:70px;" placeholder="Mer information..." oninput="nyUtbildningDraft.fritext = this.value"></textarea>
+        <textarea class="field-input" id="utbildning-fritext" style="min-height:70px;" placeholder="Mer information..." oninput="nyUtbildningDraft.fritext = this.value">${d.fritext}</textarea>
       </div>
       <div id="utbildning-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
       <button class="btn-primary" onclick="submitNyUtbildning()">Skapa utbildning</button>
       <button class="btn-secondary" onclick="document.getElementById('ny-utbildning-overlay').remove()">Avbryt</button>
-    </div>
   `;
-  document.body.appendChild(overlay);
+}
+
+function toggleUtbildningFlerdagar(checked) {
+  nyUtbildningDraft.slutdatum = checked ? nyUtbildningDraft.datum : null;
+  renderNyUtbildningBody();
+}
+
+function openUtbildningSlutdatumPicker() {
+  openGenericDatePicker(
+    () => nyUtbildningDraft.slutdatum,
+    (iso) => { nyUtbildningDraft.slutdatum = iso; document.getElementById("utbildning-slutdatum-btn").textContent = fmtSvFull(iso); }
+  );
 }
 
 function openUtbildningDatumPicker() {
   openGenericDatePicker(
     () => nyUtbildningDraft.datum,
-    (iso) => { nyUtbildningDraft.datum = iso; document.getElementById("utbildning-datum-btn").textContent = fmtSvFull(iso); }
+    (iso) => {
+      nyUtbildningDraft.datum = iso;
+      document.getElementById("utbildning-datum-btn").textContent = fmtSvFull(iso);
+      if (nyUtbildningDraft.slutdatum && nyUtbildningDraft.slutdatum < iso) {
+        nyUtbildningDraft.slutdatum = iso;
+        renderNyUtbildningBody();
+      }
+    }
   );
 }
 
@@ -7587,7 +7622,7 @@ async function submitNyUtbildning() {
   const user = getCurrentUser();
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("utbildningar").insert({
-    namn: nyUtbildningDraft.namn.trim(), datum: nyUtbildningDraft.datum,
+    namn: nyUtbildningDraft.namn.trim(), datum: nyUtbildningDraft.datum, slutdatum: nyUtbildningDraft.slutdatum,
     lank_eller_mail: nyUtbildningDraft.lank_eller_mail.trim(), anmalan_deadline: nyUtbildningDraft.anmalan_deadline,
     fritext: nyUtbildningDraft.fritext.trim(), created_by: user.id,
   });
@@ -7603,46 +7638,81 @@ let editUtbildningDraft = null;
 function openEditUtbildningModal(id) {
   const u = utbildningarCache.find(x => x.id === id);
   if (!u) return;
-  editUtbildningDraft = { id, namn: u.namn, datum: u.datum, lank_eller_mail: u.lank_eller_mail || "", anmalan_deadline: u.anmalan_deadline || isoDate(new Date()), fritext: u.fritext || "" };
+  editUtbildningDraft = { id, namn: u.namn, datum: u.datum, slutdatum: u.slutdatum || null, lank_eller_mail: u.lank_eller_mail || "", anmalan_deadline: u.anmalan_deadline || isoDate(new Date()), fritext: u.fritext || "" };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "edit-utbildning-overlay";
   overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `
-    <div class="kassa-modal-card">
-      <div class="kassa-modal-title">Redigera utbildning</div>
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Redigera utbildning</div><div id="edit-utbildning-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderEditUtbildningBody();
+}
+
+function renderEditUtbildningBody() {
+  const d = editUtbildningDraft;
+  const wrap = document.getElementById("edit-utbildning-body");
+  wrap.innerHTML = `
       <div class="field-group">
         <label class="field-label">Namn på utbildning</label>
-        <input class="field-input" id="edit-utbildning-namn" type="text" value="${u.namn}" oninput="editUtbildningDraft.namn = this.value">
+        <input class="field-input" id="edit-utbildning-namn" type="text" value="${d.namn}" oninput="editUtbildningDraft.namn = this.value">
       </div>
       <div class="field-group">
-        <label class="field-label">Datum</label>
-        <button type="button" class="field-input kassa-date-btn" id="edit-utbildning-datum-btn" onclick="openEditUtbildningDatumPicker()">${fmtSvFull(editUtbildningDraft.datum)}</button>
+        <label class="field-label">${d.slutdatum ? "Startdatum" : "Datum"}</label>
+        <button type="button" class="field-input kassa-date-btn" id="edit-utbildning-datum-btn" onclick="openEditUtbildningDatumPicker()">${fmtSvFull(d.datum)}</button>
       </div>
+      <div class="field-group">
+        <label class="kassa-check-row" style="border:1px solid var(--line); border-radius:12px;">
+          <input type="checkbox" ${d.slutdatum ? "checked" : ""} onchange="toggleEditUtbildningFlerdagar(this.checked)">
+          <span class="kassa-check-name" style="font-weight:400;">Flera dagar</span>
+        </label>
+      </div>
+      ${d.slutdatum ? `
+        <div class="field-group">
+          <label class="field-label">Slutdatum</label>
+          <button type="button" class="field-input kassa-date-btn" id="edit-utbildning-slutdatum-btn" onclick="openEditUtbildningSlutdatumPicker()">${fmtSvFull(d.slutdatum)}</button>
+        </div>
+      ` : ""}
       <div class="field-group">
         <label class="field-label">Länk eller mail till anmälan (valfritt)</label>
-        <input class="field-input" id="edit-utbildning-lank" type="text" value="${u.lank_eller_mail || ""}" oninput="editUtbildningDraft.lank_eller_mail = this.value">
+        <input class="field-input" id="edit-utbildning-lank" type="text" value="${d.lank_eller_mail}" oninput="editUtbildningDraft.lank_eller_mail = this.value">
       </div>
       <div class="field-group">
         <label class="field-label">Sista anmälningsdag (valfritt)</label>
-        <button type="button" class="field-input kassa-date-btn" id="edit-utbildning-deadline-btn" onclick="openEditUtbildningDeadlinePicker()">${fmtSvFull(editUtbildningDraft.anmalan_deadline)}</button>
+        <button type="button" class="field-input kassa-date-btn" id="edit-utbildning-deadline-btn" onclick="openEditUtbildningDeadlinePicker()">${fmtSvFull(d.anmalan_deadline)}</button>
       </div>
       <div class="field-group">
         <label class="field-label">Beskrivning (valfritt)</label>
-        <textarea class="field-input" id="edit-utbildning-fritext" style="min-height:70px;" oninput="editUtbildningDraft.fritext = this.value">${u.fritext || ""}</textarea>
+        <textarea class="field-input" id="edit-utbildning-fritext" style="min-height:70px;" oninput="editUtbildningDraft.fritext = this.value">${d.fritext}</textarea>
       </div>
       <div id="edit-utbildning-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
       <button class="btn-primary" onclick="saveEditUtbildning()">Spara ändringar</button>
       <button class="btn-secondary" onclick="document.getElementById('edit-utbildning-overlay').remove()">Avbryt</button>
-    </div>
   `;
-  document.body.appendChild(overlay);
+}
+
+function toggleEditUtbildningFlerdagar(checked) {
+  editUtbildningDraft.slutdatum = checked ? editUtbildningDraft.datum : null;
+  renderEditUtbildningBody();
+}
+
+function openEditUtbildningSlutdatumPicker() {
+  openGenericDatePicker(
+    () => editUtbildningDraft.slutdatum,
+    (iso) => { editUtbildningDraft.slutdatum = iso; document.getElementById("edit-utbildning-slutdatum-btn").textContent = fmtSvFull(iso); }
+  );
 }
 
 function openEditUtbildningDatumPicker() {
   openGenericDatePicker(
     () => editUtbildningDraft.datum,
-    (iso) => { editUtbildningDraft.datum = iso; document.getElementById("edit-utbildning-datum-btn").textContent = fmtSvFull(iso); }
+    (iso) => {
+      editUtbildningDraft.datum = iso;
+      document.getElementById("edit-utbildning-datum-btn").textContent = fmtSvFull(iso);
+      if (editUtbildningDraft.slutdatum && editUtbildningDraft.slutdatum < iso) {
+        editUtbildningDraft.slutdatum = iso;
+        renderEditUtbildningBody();
+      }
+    }
   );
 }
 
@@ -7658,7 +7728,7 @@ async function saveEditUtbildning() {
   if (!editUtbildningDraft.namn.trim()) { errorBox.textContent = "Skriv ett namn på utbildningen."; return; }
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("utbildningar").update({
-    namn: editUtbildningDraft.namn.trim(), datum: editUtbildningDraft.datum,
+    namn: editUtbildningDraft.namn.trim(), datum: editUtbildningDraft.datum, slutdatum: editUtbildningDraft.slutdatum,
     lank_eller_mail: editUtbildningDraft.lank_eller_mail.trim(), anmalan_deadline: editUtbildningDraft.anmalan_deadline,
     fritext: editUtbildningDraft.fritext.trim(),
   }).eq("id", editUtbildningDraft.id);
