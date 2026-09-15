@@ -7990,13 +7990,13 @@ function deleteKampanj(id) {
    Fasta länkar, Lösenord. De två länk-flikarna fungerar identiskt,
    bara skilda åt av en kategori-etikett. Alla får lägga till på
    samtliga tre flikar. ---- */
-let ovrigtTab = "aktuella";
+let ovrigtTab = "lankar";
 let losenordCache = [];
 
 async function showOvrigt() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-snabblankar").style.display = "block";
-  ovrigtTab = "aktuella";
+  ovrigtTab = "lankar";
   await loadSnabblankar();
   renderOvrigtView();
 }
@@ -8024,8 +8024,8 @@ function renderOvrigtView() {
   const container = document.getElementById("snabblankar-results");
   container.innerHTML = `
     <div class="view-toggle">
-      <button id="ovrigt-tab-aktuella" onclick="setOvrigtTab('aktuella')">Aktuella</button>
-      <button id="ovrigt-tab-fast" onclick="setOvrigtTab('fast')">Fasta länkar</button>
+      <button id="ovrigt-tab-lankar" onclick="setOvrigtTab('lankar')">Länkar</button>
+      <button id="ovrigt-tab-telefon" onclick="setOvrigtTab('telefon')">Telefonnummer</button>
       <button id="ovrigt-tab-losenord" onclick="setOvrigtTab('losenord')">Lösenord</button>
     </div>
     <div id="ovrigt-content" style="margin-top:16px;"></div>
@@ -8042,6 +8042,8 @@ function renderOvrigtView() {
       <div id="losenord-list" style="margin-top:14px;"></div>
     `;
     renderLosenordList();
+  } else if (ovrigtTab === "telefon") {
+    showTelefonnummerTab();
   } else {
     contentWrap.innerHTML = `
       <button class="btn-primary" onclick="openNewSnabblankModal()">+ Ny länk</button>
@@ -8049,6 +8051,251 @@ function renderOvrigtView() {
     `;
     renderSnabblankarList();
   }
+}
+
+/* ---- Telefonnummer ---- */
+const TELEFON_IKONER = ["📞", "🏥", "🏢", "🚨", "🚑", "👮", "🔧", "⚖️", "🏦", "📦", "🧑‍💼", "🏠"];
+let telefonKategorierCache = [];
+let telefonKontakterCache = [];
+
+async function showTelefonnummerTab() {
+  await loadTelefonnummer();
+  renderTelefonnummerContent();
+}
+
+async function loadTelefonnummer() {
+  const [katRes, kontRes] = await Promise.all([
+    sb.from("telefonnummer_kategorier").select("*").order("namn", { ascending: true }),
+    sb.from("telefonnummer_kontakter").select("*").order("namn", { ascending: true }),
+  ]);
+  telefonKategorierCache = katRes.data || [];
+  telefonKontakterCache = kontRes.data || [];
+}
+
+function renderTelefonnummerContent() {
+  const wrap = document.getElementById("ovrigt-content");
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <div style="display:flex; gap:8px;">
+      <button class="btn-primary" style="flex:1;" onclick="openNyTelefonkontaktModal()">+ Nytt nummer</button>
+      <button class="btn-secondary" onclick="openNyTelefonkategoriModal()">+ Ny kategori</button>
+    </div>
+    <div id="telefon-list" style="margin-top:16px;"></div>
+  `;
+  renderTelefonList();
+}
+
+function renderTelefonList() {
+  const wrap = document.getElementById("telefon-list");
+  if (!wrap) return;
+  if (!telefonKontakterCache.length) { wrap.innerHTML = `<div class="empty-state">Inga telefonnummer tillagda ännu.</div>`; return; }
+
+  const grupper = [...telefonKategorierCache].sort((a, b) => a.namn.localeCompare(b.namn, "sv"));
+  const ingenKategori = telefonKontakterCache.filter(k => !k.kategori_id || !grupper.some(g => g.id === k.kategori_id));
+
+  let html = "";
+  grupper.forEach(kat => {
+    const kontakter = telefonKontakterCache.filter(k => k.kategori_id === kat.id);
+    if (!kontakter.length) return;
+    html += telefonGruppHtml(`${kat.ikon || "📞"} ${kat.namn}`, kontakter);
+  });
+  if (ingenKategori.length) html += telefonGruppHtml("📋 Ingen kategori", ingenKategori);
+
+  wrap.innerHTML = html || `<div class="empty-state">Inga telefonnummer tillagda ännu.</div>`;
+}
+
+function telefonGruppHtml(rubrik, kontakter) {
+  return `
+    <div class="kassa-section-title" style="margin-top:16px;">${rubrik}</div>
+    <div class="kassa-row-list">
+      ${kontakter.map(k => `
+        <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-wrap:wrap;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700; font-size:13.5px;">${k.namn}</div>
+            ${(k.nummer || []).map(n => `<a href="tel:${n.replace(/[^0-9+]/g, "")}" style="display:block; color:var(--green-700); font-weight:700; font-size:12.5px; text-decoration:none; margin-top:2px;">📞 ${n}</a>`).join("")}
+            ${k.fritext ? `<div style="font-size:11.5px; color:var(--muted); margin-top:3px;">${k.fritext}</div>` : ""}
+          </div>
+          <button class="kr-edit" onclick="openEditTelefonkontaktModal('${k.id}')" aria-label="Redigera">✎</button>
+          <button class="kr-delete" onclick="deleteTelefonkontakt('${k.id}')" aria-label="Ta bort">✕</button>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+let nyTelefonkategoriIkonDraft = "📞";
+function openNyTelefonkategoriModal() {
+  nyTelefonkategoriIkonDraft = "📞";
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "ny-telefonkategori-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Ny kategori</div>
+      <div class="field-group">
+        <label class="field-label">Namn</label>
+        <input class="field-input" id="telefonkategori-namn" type="text" placeholder="T.ex. Vård, Företag, Vakter...">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Ikon</label>
+        <div id="telefonkategori-ikon-picker"></div>
+      </div>
+      <div id="telefonkategori-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitNyTelefonkategori()">Skapa kategori</button>
+      <button class="btn-secondary" onclick="document.getElementById('ny-telefonkategori-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  renderTelefonkategoriIkonPicker();
+}
+
+function renderTelefonkategoriIkonPicker() {
+  const wrap = document.getElementById("telefonkategori-ikon-picker");
+  if (!wrap) return;
+  const isPreset = TELEFON_IKONER.includes(nyTelefonkategoriIkonDraft);
+  wrap.innerHTML = `
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+      ${TELEFON_IKONER.map(ic => `
+        <button type="button" onclick="nyTelefonkategoriIkonDraft = '${ic}'; renderTelefonkategoriIkonPicker();" style="width:38px; height:38px; border-radius:10px; font-size:17px; cursor:pointer; border:2px solid ${nyTelefonkategoriIkonDraft === ic ? "var(--green-700)" : "var(--line)"}; background:${nyTelefonkategoriIkonDraft === ic ? "var(--green-050)" : "var(--white)"};">${ic}</button>
+      `).join("")}
+    </div>
+    <input type="text" maxlength="4" value="${isPreset ? "" : nyTelefonkategoriIkonDraft}" placeholder="😀 Eller skriv valfri emoji" oninput="nyTelefonkategoriIkonDraft = this.value.trim() || '📞';" style="width:150px; height:38px; margin-top:8px; border-radius:10px; border:2px solid var(--line); text-align:center; font-size:17px;">
+  `;
+}
+
+async function submitNyTelefonkategori() {
+  const namn = document.getElementById("telefonkategori-namn").value.trim();
+  const errorBox = document.getElementById("telefonkategori-error");
+  if (!namn) { errorBox.textContent = "Skriv ett namn på kategorin."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("telefonnummer_kategorier").insert({ namn, ikon: nyTelefonkategoriIkonDraft, created_by: user.id });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("ny-telefonkategori-overlay");
+  if (overlay) overlay.remove();
+  await loadTelefonnummer();
+  renderTelefonList();
+}
+
+let nyTelefonkontaktDraft = null;
+function openNyTelefonkontaktModal() {
+  nyTelefonkontaktDraft = { namn: "", kategori_id: telefonKategorierCache[0] ? telefonKategorierCache[0].id : "", nummer: [""], fritext: "", isEdit: false };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "ny-telefonkontakt-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Nytt telefonnummer</div><div id="ny-telefonkontakt-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderNyTelefonkontaktBody();
+}
+
+function renderNyTelefonkontaktBody() {
+  const d = nyTelefonkontaktDraft;
+  const wrap = document.getElementById("ny-telefonkontakt-body");
+  wrap.innerHTML = `
+      <div class="field-group">
+        <label class="field-label">Namn</label>
+        <input class="field-input" id="telefonkontakt-namn" type="text" placeholder="T.ex. Dr. Andersson" value="${d.namn}" oninput="nyTelefonkontaktDraft.namn = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Kategori</label>
+        ${telefonKategorierCache.length ? `
+          <select class="field-input" onchange="nyTelefonkontaktDraft.kategori_id = this.value">
+            ${telefonKategorierCache.map(k => `<option value="${k.id}" ${d.kategori_id === k.id ? "selected" : ""}>${k.ikon} ${k.namn}</option>`).join("")}
+          </select>
+        ` : `<div style="font-size:11.5px; color:var(--muted);">Inga kategorier ännu — skapa en först med "+ Ny kategori".</div>`}
+      </div>
+      <div class="field-group">
+        <label class="field-label">Telefonnummer</label>
+        ${d.nummer.map((n, i) => `
+          <div style="display:flex; gap:6px; margin-bottom:6px;">
+            <input class="field-input" type="tel" value="${n}" oninput="nyTelefonkontaktDraft.nummer[${i}] = this.value" style="flex:1;">
+            ${d.nummer.length > 1 ? `<button type="button" onclick="taBortTelefonkontaktNummer(${i})" style="width:38px; border-radius:10px; border:1px solid var(--line); background:var(--white); color:#b3261e; cursor:pointer;">✕</button>` : ""}
+          </div>
+        `).join("")}
+        <a href="#" onclick="event.preventDefault(); leggTillTelefonkontaktNummer();" style="font-size:11.5px; font-weight:700; color:var(--green-700);">+ Lägg till fler nummer</a>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Fritext (valfritt)</label>
+        <textarea class="field-input" id="telefonkontakt-fritext" style="min-height:60px;" oninput="nyTelefonkontaktDraft.fritext = this.value">${d.fritext}</textarea>
+      </div>
+      <div id="ny-telefonkontakt-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="${d.isEdit ? "saveEditTelefonkontakt()" : "submitNyTelefonkontakt()"}">${d.isEdit ? "Spara ändringar" : "Spara"}</button>
+      <button class="btn-secondary" onclick="document.getElementById('ny-telefonkontakt-overlay').remove()">Avbryt</button>
+  `;
+}
+
+function leggTillTelefonkontaktNummer() {
+  nyTelefonkontaktDraft.nummer.push("");
+  renderNyTelefonkontaktBody();
+}
+
+function taBortTelefonkontaktNummer(i) {
+  nyTelefonkontaktDraft.nummer.splice(i, 1);
+  renderNyTelefonkontaktBody();
+}
+
+async function submitNyTelefonkontakt() {
+  const d = nyTelefonkontaktDraft;
+  const errorBox = document.getElementById("ny-telefonkontakt-error");
+  if (!d.namn.trim()) { errorBox.textContent = "Skriv ett namn."; return; }
+  const nummer = d.nummer.map(n => n.trim()).filter(Boolean);
+  if (!nummer.length) { errorBox.textContent = "Fyll i minst ett telefonnummer."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("telefonnummer_kontakter").insert({
+    namn: d.namn.trim(), kategori_id: d.kategori_id || null, nummer, fritext: d.fritext.trim(), created_by: user.id,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("ny-telefonkontakt-overlay");
+  if (overlay) overlay.remove();
+  await loadTelefonnummer();
+  renderTelefonList();
+}
+
+function openEditTelefonkontaktModal(id) {
+  const k = telefonKontakterCache.find(x => x.id === id);
+  if (!k) return;
+  nyTelefonkontaktDraft = { id, namn: k.namn, kategori_id: k.kategori_id || (telefonKategorierCache[0] ? telefonKategorierCache[0].id : ""), nummer: k.nummer && k.nummer.length ? [...k.nummer] : [""], fritext: k.fritext || "", isEdit: true };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "ny-telefonkontakt-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Redigera telefonnummer</div><div id="ny-telefonkontakt-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderNyTelefonkontaktBody();
+}
+
+async function saveEditTelefonkontakt() {
+  const d = nyTelefonkontaktDraft;
+  const errorBox = document.getElementById("ny-telefonkontakt-error");
+  if (!d.namn.trim()) { errorBox.textContent = "Skriv ett namn."; return; }
+  const nummer = d.nummer.map(n => n.trim()).filter(Boolean);
+  if (!nummer.length) { errorBox.textContent = "Fyll i minst ett telefonnummer."; return; }
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("telefonnummer_kontakter").update({
+    namn: d.namn.trim(), kategori_id: d.kategori_id || null, nummer, fritext: d.fritext.trim(),
+  }).eq("id", d.id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("ny-telefonkontakt-overlay");
+  if (overlay) overlay.remove();
+  await loadTelefonnummer();
+  renderTelefonList();
+}
+
+function deleteTelefonkontakt(id) {
+  const k = telefonKontakterCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort kontakt?",
+    `<strong>${k ? k.namn : "Kontakten"}</strong> tas bort permanent. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("telefonnummer_kontakter").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadTelefonnummer();
+      renderTelefonList();
+    }
+  );
 }
 
 function openNewSnabblankModal() {
@@ -8116,7 +8363,7 @@ function selectSnabblankIkon(ic) {
 function renderSnabblankarList() {
   const wrap = document.getElementById("snabblankar-list");
   if (!wrap) return;
-  const list = snabblankarCache.filter(l => (l.kategori || "aktuella") === ovrigtTab);
+  const list = snabblankarCache;
   wrap.innerHTML = list.length
     ? `<div class="kassa-row-list">${list.map(l => `
         <div class="kassa-row" onclick="window.open('${l.url}', '_blank', 'noopener')">
