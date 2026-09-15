@@ -4492,6 +4492,14 @@ function renderLagerHub() {
         <div class="nav-label">Varuansvarig</div>
         <div class="nav-sub">Månadens checklista</div>
       </div>
+
+      <div class="nav-card" onclick="showApl()">
+        <div class="nav-icon nav-icon-c5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 2H15V6L18 9V20C18 20.55 17.55 21 17 21H7C6.45 21 6 20.55 6 20V9L9 6V2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 13H15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">APL</div>
+        <div class="nav-sub">Produkter & utgångsdatum</div>
+      </div>
     </div>
   `;
 }
@@ -4826,6 +4834,161 @@ let lagerChecklistaAllaProfiler = [];
 async function goToLagerChecklista() {
   await showLager();
   await showLagerChecklista();
+}
+
+/* ---- APL ---- */
+let aplCache = [];
+
+async function showApl() {
+  lagerSection = "apl";
+  await loadApl();
+  renderAplView();
+}
+
+async function loadApl() {
+  const { data, error } = await sb.from("apl_produkter").select("*").order("utgangsdatum", { ascending: true });
+  aplCache = error ? [] : data;
+}
+
+function aplUtgangsFarg(utgangsdatum) {
+  if (!utgangsdatum) return null;
+  const idag = isoDate(new Date());
+  const om30dagar = isoDate(new Date(Date.now() + 30 * 86400000));
+  if (utgangsdatum < idag) return { bg: "#fdecec", text: "#b3261e", etikett: "Utgången" };
+  if (utgangsdatum <= om30dagar) return { bg: "#fff3d6", text: "#b5590a", etikett: "Går snart ut" };
+  return { bg: "var(--green-100)", text: "var(--green-700)", etikett: null };
+}
+
+function renderAplView() {
+  const container = document.getElementById("lager-results");
+  container.innerHTML = `
+    <button class="btn-primary" onclick="openNyAplModal()">+ Ny produkt</button>
+    <div class="kassa-row-list" style="margin-top:16px;">
+      ${aplCache.length ? aplCache.map(p => {
+        const f = aplUtgangsFarg(p.utgangsdatum);
+        return `
+        <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-wrap:wrap;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700; font-size:13.5px;">${p.namn}</div>
+            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${p.vnr ? `VNR ${p.vnr} · ` : ""}Antal: ${p.antal}</div>
+            ${p.utgangsdatum ? `<span class="org-badge" style="background:${f.bg}; color:${f.text}; font-weight:800; margin-top:4px;">${f.etikett ? f.etikett + " · " : ""}${fmtSvShort(p.utgangsdatum)}</span>` : ""}
+            ${p.fritext ? `<div style="font-size:12px; margin-top:5px; white-space:pre-wrap;">${p.fritext}</div>` : ""}
+          </div>
+          <button class="kr-edit" onclick="openEditAplModal('${p.id}')" aria-label="Redigera">✎</button>
+          <button class="kr-delete" onclick="deleteApl('${p.id}')" aria-label="Ta bort">✕</button>
+        </div>
+      `;
+      }).join("") : `<div class="empty-state">Inga produkter tillagda ännu.</div>`}
+    </div>
+  `;
+}
+
+let aplDraft = null;
+function openNyAplModal() {
+  aplDraft = { namn: "", vnr: "", antal: 1, utgangsdatum: null, fritext: "", isEdit: false };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "apl-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Ny APL-produkt</div><div id="apl-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderAplBody();
+}
+
+function renderAplBody() {
+  const d = aplDraft;
+  const wrap = document.getElementById("apl-body");
+  wrap.innerHTML = `
+      <div class="field-group">
+        <label class="field-label">Namn</label>
+        <input class="field-input" id="apl-namn" type="text" placeholder="T.ex. APL Hostmedicin" value="${d.namn}" oninput="aplDraft.namn = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">VNR (valfritt)</label>
+        <input class="field-input" id="apl-vnr" type="text" inputmode="numeric" value="${d.vnr}" oninput="aplDraft.vnr = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Antal</label>
+        <input class="field-input" id="apl-antal" type="number" min="1" value="${d.antal}" oninput="aplDraft.antal = parseInt(this.value) || 1">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Utgångsdatum (valfritt)</label>
+        <button type="button" class="field-input kassa-date-btn" onclick="openAplUtgangsdatumPicker()">${d.utgangsdatum ? fmtSvFull(d.utgangsdatum) : "Inget valt"}</button>
+        ${d.utgangsdatum ? `<button type="button" class="btn-secondary" style="margin-top:6px;" onclick="aplDraft.utgangsdatum = null; renderAplBody();">Ta bort datum</button>` : ""}
+      </div>
+      <div class="field-group">
+        <label class="field-label">Fritext (valfritt)</label>
+        <textarea class="field-input" id="apl-fritext" style="min-height:60px;" oninput="aplDraft.fritext = this.value">${d.fritext}</textarea>
+      </div>
+      <div id="apl-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="${d.isEdit ? "saveEditApl()" : "submitNyApl()"}">${d.isEdit ? "Spara ändringar" : "Spara"}</button>
+      <button class="btn-secondary" onclick="document.getElementById('apl-overlay').remove()">Avbryt</button>
+  `;
+}
+
+function openAplUtgangsdatumPicker() {
+  openGenericDatePicker(
+    () => aplDraft.utgangsdatum || isoDate(new Date()),
+    (iso) => { aplDraft.utgangsdatum = iso; renderAplBody(); }
+  );
+}
+
+async function submitNyApl() {
+  const d = aplDraft;
+  const errorBox = document.getElementById("apl-error");
+  if (!d.namn.trim()) { errorBox.textContent = "Skriv ett namn."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("apl_produkter").insert({
+    namn: d.namn.trim(), vnr: d.vnr.trim(), antal: d.antal, utgangsdatum: d.utgangsdatum, fritext: d.fritext.trim(), created_by: user.id,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("apl-overlay");
+  if (overlay) overlay.remove();
+  await loadApl();
+  renderAplView();
+}
+
+function openEditAplModal(id) {
+  const p = aplCache.find(x => x.id === id);
+  if (!p) return;
+  aplDraft = { id, namn: p.namn, vnr: p.vnr || "", antal: p.antal, utgangsdatum: p.utgangsdatum || null, fritext: p.fritext || "", isEdit: true };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "apl-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Redigera APL-produkt</div><div id="apl-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderAplBody();
+}
+
+async function saveEditApl() {
+  const d = aplDraft;
+  const errorBox = document.getElementById("apl-error");
+  if (!d.namn.trim()) { errorBox.textContent = "Skriv ett namn."; return; }
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("apl_produkter").update({
+    namn: d.namn.trim(), vnr: d.vnr.trim(), antal: d.antal, utgangsdatum: d.utgangsdatum, fritext: d.fritext.trim(),
+  }).eq("id", d.id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("apl-overlay");
+  if (overlay) overlay.remove();
+  await loadApl();
+  renderAplView();
+}
+
+function deleteApl(id) {
+  const p = aplCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort produkt?",
+    `<strong>${p ? p.namn : "Produkten"}</strong> tas bort permanent. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("apl_produkter").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadApl();
+      renderAplView();
+    }
+  );
 }
 
 async function showLagerChecklista() {
