@@ -4023,7 +4023,7 @@ let inkopTab = "att-bestalla";
 let inkopCache = [];
 let inkopMallarCache = [];
 let inkopSearchQuery = "";
-let inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null, anteckning: "" };
+let inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null, anteckning: "", vnr: "" };
 
 function normalizeSearch(s) {
   return (s || "").toLowerCase().normalize("NFKD").replace(/\s+/g, " ").trim();
@@ -4098,7 +4098,7 @@ function renderInkopList() {
           <div style="flex:1; min-width:0; margin-left:8px;">
             <div style="font-weight:700; ${i.bestalld ? "text-decoration:line-through; color:var(--muted);" : ""}">${i.vad}</div>
             <div style="font-size:11px; color:var(--muted); margin-top:2px;">
-              Antal: ${i.antal}${i.bestalld && i.bestalld_datum ? ` · Beställt ${fmtSvShort(i.bestalld_datum)}` : ""}
+              ${i.vnr ? `VNR ${i.vnr} · ` : ""}Antal: ${i.antal}${i.bestalld && i.bestalld_datum ? ` · Beställt ${fmtSvShort(i.bestalld_datum)}` : ""}
               ${i.lank ? ` · <a href="${i.lank}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--green-700); font-weight:700;">🔗 Beställningssida</a>` : ""}
             </div>
             ${i.anteckning ? `<div style="font-size:11px; color:var(--muted); margin-top:2px; font-style:italic;">${i.anteckning}</div>` : ""}
@@ -4110,7 +4110,7 @@ function renderInkopList() {
 }
 
 function openNewInkopModal() {
-  inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null, anteckning: "" };
+  inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null, anteckning: "", vnr: "" };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "inkop-new-overlay";
@@ -4177,6 +4177,7 @@ function selectInkopMall(mallId) {
   if (!mall) return;
   inkopDraft.vad = mall.namn;
   inkopDraft.lank = mall.lank || "";
+  inkopDraft.vnr = mall.vnr || "";
   inkopDraft.valdMallId = mallId;
   const input = document.getElementById("inkop-vad-input");
   if (input) input.value = mall.namn;
@@ -4203,7 +4204,7 @@ async function submitInkop() {
   const vald = inkopDraft.valdMallId ? inkopMallarCache.find(m => m.id === inkopDraft.valdMallId) : null;
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("inkop").insert({
-    vad: inkopDraft.vad.trim(), antal: inkopDraft.antal || 1, lank: inkopDraft.lank || "",
+    vad: inkopDraft.vad.trim(), antal: inkopDraft.antal || 1, lank: inkopDraft.lank || "", vnr: inkopDraft.vnr || "",
     tilldelad_till: vald ? vald.tilldelad_till : null, anteckning: inkopDraft.anteckning || "", created_by: user.id,
   });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
@@ -6080,8 +6081,10 @@ async function loadLedighet() {
   let query = sb.from("ledighetsansokan").select("*").order("fran_datum", { ascending: false });
   if (ledighetTab === "mina") {
     query = query.eq("user_id", user.id);
-  } else if (ledighetFilterUser) {
-    query = query.eq("user_id", ledighetFilterUser);
+  } else {
+    if (ledighetFilterUser) query = query.eq("user_id", ledighetFilterUser);
+    if (ledighetTab === "alla") query = query.eq("status", "vantar");
+    else if (ledighetTab === "hanterade") query = query.neq("status", "vantar");
   }
   const { data, error } = await query;
   ledighetCache = error ? [] : data;
@@ -6112,8 +6115,9 @@ function renderLedighetView() {
     <div class="view-toggle" style="margin-top:16px;">
       <button id="ledighet-tab-mina" onclick="setLedighetTab('mina')">Mina ansökningar</button>
       ${isChef() ? `<button id="ledighet-tab-alla" onclick="setLedighetTab('alla')">Alla medarbetare</button>` : ""}
+      ${isChef() ? `<button id="ledighet-tab-hanterade" onclick="setLedighetTab('hanterade')">Hanterade ansökningar</button>` : ""}
     </div>
-    ${ledighetTab === "alla" && isChef() ? `
+    ${(ledighetTab === "alla" || ledighetTab === "hanterade") && isChef() ? `
       <div class="field-group" style="margin-top:12px;">
         <label class="field-label">Sortera på medarbetare</label>
         <select class="field-input" id="ledighet-filter-select" onchange="setLedighetFilter(this.value)">
@@ -6131,7 +6135,7 @@ function renderLedighetView() {
 function renderLedighetList() {
   const wrap = document.getElementById("ledighet-list");
   if (!wrap) return;
-  const visaMedarbetare = ledighetTab === "alla";
+  const visaMedarbetare = ledighetTab === "alla" || ledighetTab === "hanterade";
   const user = getCurrentUser();
   wrap.innerHTML = ledighetCache.length
     ? `<div class="kassa-row-list">${ledighetCache.map(a => {
@@ -6152,7 +6156,7 @@ function renderLedighetList() {
         </div>
       `;
       }).join("")}</div>`
-    : `<div class="empty-state">Inga ansökningar ${ledighetTab === "mina" ? "ännu" : "att visa"}.</div>`;
+    : `<div class="empty-state">Inga ansökningar ${ledighetTab === "mina" ? "ännu" : ledighetTab === "hanterade" ? "hanterade ännu" : "väntar just nu"}.</div>`;
 }
 
 function openLedighetFranDag(iso) {
@@ -8920,7 +8924,11 @@ function renderReklamationFormFields() {
 
     <div class="field-group">
       <label class="field-label">Bild (valfritt)</label>
-      <input class="field-input" id="reklamation-bild-input" type="file" accept="image/*">
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn-secondary" style="flex:1; margin-top:0;" onclick="document.getElementById('reklamation-bild-input').removeAttribute('capture'); document.getElementById('reklamation-bild-input').click();">🖼️ Välj bild</button>
+        <button type="button" class="btn-secondary" style="flex:1; margin-top:0;" onclick="document.getElementById('reklamation-bild-input').setAttribute('capture', 'environment'); document.getElementById('reklamation-bild-input').click();">📷 Ta foto</button>
+      </div>
+      <input class="field-input" id="reklamation-bild-input" type="file" accept="image/*" style="display:none;">
       ${reklamationDraft.bildFile ? `<div style="font-size:11px; color:var(--green-700); margin-top:4px;">✔ ${reklamationDraft.bildFile.name} vald</div>` : ""}
     </div>
   `;
@@ -9037,7 +9045,13 @@ function openReklamationDetail(id) {
       <div class="field-group">
         <label class="field-label">Bild</label>
         ${r.bild_url ? `<img src="${r.bild_url}" style="width:100%; border-radius:12px; margin-bottom:8px;">` : `<div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Ingen bild uppladdad.</div>`}
-        ${editable ? `<input class="field-input" id="rekl-bild-input" type="file" accept="image/*">` : ""}
+        ${editable ? `
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="btn-secondary" style="flex:1; margin-top:0;" onclick="document.getElementById('rekl-bild-input').removeAttribute('capture'); document.getElementById('rekl-bild-input').click();">🖼️ Välj bild</button>
+            <button type="button" class="btn-secondary" style="flex:1; margin-top:0;" onclick="document.getElementById('rekl-bild-input').setAttribute('capture', 'environment'); document.getElementById('rekl-bild-input').click();">📷 Ta foto</button>
+          </div>
+          <input class="field-input" id="rekl-bild-input" type="file" accept="image/*" style="display:none;">
+        ` : ""}
       </div>
 
       <div class="kassa-section-title">Del 2 — Fortsatt dokumentation</div>
