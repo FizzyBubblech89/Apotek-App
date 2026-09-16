@@ -6317,6 +6317,12 @@ function deleteLedighet(id) {
 }
 
 /* ---- Byte av pass ---- */
+function hamtaMinArbetstidForDag(iso) {
+  const dagensPass = (myEvents || []).filter(e => isoDate(e.start) === iso);
+  if (!dagensPass.length) return "";
+  return dagensPass.map(e => `${fmtTime(e.start)}–${fmtTime(e.end)}`).join(", ");
+}
+
 function utbildningsgrupp(utbildning) {
   if (!utbildning) return null;
   if (utbildning.startsWith("Farmacevt")) return "farmacevt";
@@ -6364,7 +6370,9 @@ function renderPassbyteTab() {
         <div class="kassa-row" style="align-items:flex-start; flex-wrap:wrap; cursor:pointer;" onclick="openPassbyteDetail('${b.id}')">
           <div style="flex:1; min-width:0;">
             <div style="font-weight:700; font-size:13px;">${person ? person.name : b.signum}${b.status === "avslutad" ? ` <span class="org-badge" style="background:var(--line); color:var(--muted); font-weight:800;">Avslutat</span>` : ""}</div>
-            <div style="font-size:12.5px; font-weight:700; margin-top:2px;">${(b.dagar || []).map(d => fmtSvShort(d)).join(", ")}</div>
+            <div style="font-size:12.5px; font-weight:700; margin-top:2px;">
+              ${(b.dagar || []).map((d, i) => `${fmtSvShort(d)}${b.tider && b.tider[i] ? ` (${b.tider[i]})` : ""}`).join(", ")}
+            </div>
             ${b.fritext ? `<div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${b.fritext}</div>` : ""}
           </div>
           ${(arAgare || isChef()) ? `<button class="kr-delete" onclick="event.stopPropagation(); deletePassbyte('${b.id}')" aria-label="Ta bort">✕</button>` : ""}
@@ -6376,8 +6384,9 @@ function renderPassbyteTab() {
 }
 
 let nyttPassbyteDraft = null;
-function openNyttPassbyteModal() {
-  nyttPassbyteDraft = { dagar: [isoDate(new Date())], fritext: "", isEdit: false };
+async function openNyttPassbyteModal() {
+  await loadEventsForCurrentUser();
+  nyttPassbyteDraft = { dagar: [isoDate(new Date())], tider: [hamtaMinArbetstidForDag(isoDate(new Date()))], fritext: "", isEdit: false };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "nytt-passbyte-overlay";
@@ -6394,10 +6403,11 @@ function renderNyttPassbyteBody() {
       <div class="field-group">
         <label class="field-label">Vilken eller vilka dagar</label>
         ${d.dagar.map((dag, i) => `
-          <div style="display:flex; gap:6px; margin-bottom:6px;">
+          <div style="display:flex; gap:6px; margin-bottom:4px;">
             <button type="button" class="field-input kassa-date-btn" style="flex:1; text-align:left;" onclick="openPassbyteDagPicker(${i})">${fmtSvFull(dag)}</button>
             ${d.dagar.length > 1 ? `<button type="button" onclick="taBortPassbyteDag(${i})" style="width:38px; border-radius:10px; border:1px solid var(--line); background:var(--white); color:#b3261e; cursor:pointer;">✕</button>` : ""}
           </div>
+          <input class="field-input" type="text" placeholder="Arbetspasstid, t.ex. 09:30–18:15" value="${d.tider[i] || ""}" oninput="nyttPassbyteDraft.tider[${i}] = this.value" style="margin-bottom:10px; font-size:12.5px;">
         `).join("")}
         <a href="#" onclick="event.preventDefault(); leggTillPassbyteDag();" style="font-size:11.5px; font-weight:700; color:var(--green-700);">+ Lägg till fler dagar</a>
       </div>
@@ -6414,17 +6424,20 @@ function renderNyttPassbyteBody() {
 function openPassbyteDagPicker(i) {
   openGenericDatePicker(
     () => nyttPassbyteDraft.dagar[i],
-    (iso) => { nyttPassbyteDraft.dagar[i] = iso; renderNyttPassbyteBody(); }
+    (iso) => { nyttPassbyteDraft.dagar[i] = iso; nyttPassbyteDraft.tider[i] = hamtaMinArbetstidForDag(iso); renderNyttPassbyteBody(); }
   );
 }
 
 function leggTillPassbyteDag() {
-  nyttPassbyteDraft.dagar.push(isoDate(new Date()));
+  const iso = isoDate(new Date());
+  nyttPassbyteDraft.dagar.push(iso);
+  nyttPassbyteDraft.tider.push(hamtaMinArbetstidForDag(iso));
   renderNyttPassbyteBody();
 }
 
 function taBortPassbyteDag(i) {
   nyttPassbyteDraft.dagar.splice(i, 1);
+  nyttPassbyteDraft.tider.splice(i, 1);
   renderNyttPassbyteBody();
 }
 
@@ -6435,7 +6448,7 @@ async function submitNyttPassbyte() {
   const user = getCurrentUser();
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("pass_byte").insert({
-    user_id: user.id, signum: user.signum, dagar: d.dagar, fritext: d.fritext.trim(),
+    user_id: user.id, signum: user.signum, dagar: d.dagar, tider: d.tider, fritext: d.fritext.trim(),
   });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("nytt-passbyte-overlay");
@@ -6457,7 +6470,9 @@ async function openPassbyteDetail(id) {
   overlay.innerHTML = `
     <div class="kassa-modal-card">
       <div class="kassa-modal-title">${person ? person.name : b.signum}</div>
-      <div style="font-weight:700; font-size:13.5px;">${(b.dagar || []).map(dag => fmtSvShort(dag)).join(", ")}</div>
+      <div style="font-weight:700; font-size:13.5px;">
+        ${(b.dagar || []).map((dag, i) => `${fmtSvShort(dag)}${b.tider && b.tider[i] ? ` (${b.tider[i]})` : ""}`).join(", ")}
+      </div>
       ${b.fritext ? `<div style="font-size:12.5px; color:var(--muted); margin-top:4px;">${b.fritext}</div>` : ""}
       ${b.status === "avslutad" ? `<span class="org-badge" style="background:var(--line); color:var(--muted); font-weight:800; margin-top:8px;">Avslutat</span>` : ""}
 
@@ -6522,7 +6537,7 @@ async function avslutaPassbyte(id) {
 function openEditPassbyteModal(id) {
   const b = passbyteCache.find(x => x.id === id);
   if (!b) return;
-  nyttPassbyteDraft = { id, dagar: b.dagar && b.dagar.length ? [...b.dagar] : [isoDate(new Date())], fritext: b.fritext || "", isEdit: true };
+  nyttPassbyteDraft = { id, dagar: b.dagar && b.dagar.length ? [...b.dagar] : [isoDate(new Date())], tider: b.tider && b.tider.length ? [...b.tider] : (b.dagar || []).map(() => ""), fritext: b.fritext || "", isEdit: true };
   const detaljOverlay = document.getElementById("passbyte-detalj-overlay");
   if (detaljOverlay) detaljOverlay.remove();
   const overlay = document.createElement("div");
@@ -6539,7 +6554,7 @@ async function saveEditPassbyte() {
   const errorBox = document.getElementById("nytt-passbyte-error");
   if (!d.dagar.length) { errorBox.textContent = "Välj minst en dag."; return; }
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("pass_byte").update({ dagar: d.dagar, fritext: d.fritext.trim() }).eq("id", d.id);
+  const { error } = await sb.from("pass_byte").update({ dagar: d.dagar, tider: d.tider, fritext: d.fritext.trim() }).eq("id", d.id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("nytt-passbyte-overlay");
   if (overlay) overlay.remove();
