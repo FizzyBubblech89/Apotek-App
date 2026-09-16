@@ -6130,7 +6130,12 @@ async function loadLedighet() {
 
 function setLedighetTab(tab) {
   ledighetTab = tab;
-  loadLedighet().then(renderLedighetView);
+  if (tab === "byte") {
+    renderLedighetView();
+    loadPassbyte().then(renderPassbyteTab);
+  } else {
+    loadLedighet().then(renderLedighetView);
+  }
 }
 
 function setLedighetFilter(userId) {
@@ -6141,12 +6146,14 @@ function setLedighetFilter(userId) {
 function renderLedighetView() {
   const container = document.getElementById("ledighet-results");
   container.innerHTML = `
-    <button class="btn-primary" onclick="openNewLedighetModal()">+ Ansök om ledighet</button>
+    ${ledighetTab !== "byte" ? `<button class="btn-primary" onclick="openNewLedighetModal()">+ Ansök om ledighet</button>` : ""}
     <div class="view-toggle" style="margin-top:16px;">
       <button id="ledighet-tab-mina" onclick="setLedighetTab('mina')">Mina ansökningar</button>
       ${isChef() ? `<button id="ledighet-tab-alla" onclick="setLedighetTab('alla')">Alla medarbetare</button>` : ""}
       ${isChef() ? `<button id="ledighet-tab-hanterade" onclick="setLedighetTab('hanterade')">Hanterade ansökningar</button>` : ""}
+      <button id="ledighet-tab-byte" onclick="setLedighetTab('byte')">Byte av pass</button>
     </div>
+    ${ledighetTab === "byte" ? `<div id="passbyte-wrap" style="margin-top:16px;"></div>` : ""}
     ${(ledighetTab === "alla" || ledighetTab === "hanterade") && isChef() ? `
       <div class="field-group" style="margin-top:12px;">
         <label class="field-label">Sortera på medarbetare</label>
@@ -6156,10 +6163,10 @@ function renderLedighetView() {
         </select>
       </div>
     ` : ""}
-    <div id="ledighet-list" style="margin-top:14px;"></div>
+    ${ledighetTab !== "byte" ? `<div id="ledighet-list" style="margin-top:14px;"></div>` : ""}
   `;
   document.getElementById(`ledighet-tab-${ledighetTab}`).classList.add("active");
-  renderLedighetList();
+  if (ledighetTab !== "byte") renderLedighetList();
 }
 
 function renderLedighetList() {
@@ -6305,6 +6312,250 @@ function deleteLedighet(id) {
       if (error) { alert("Kunde inte ta bort: " + error.message); return; }
       await loadLedighet();
       renderLedighetList();
+    }
+  );
+}
+
+/* ---- Byte av pass ---- */
+function utbildningsgrupp(utbildning) {
+  if (!utbildning) return null;
+  if (utbildning.startsWith("Farmacevt")) return "farmacevt";
+  if (utbildning === "Apotekstekniker" || utbildning === "Apoteksassistent") return "assistent";
+  return null;
+}
+
+let passbyteCache = [];
+let passbyteAllaProfiler = [];
+
+async function loadPassbyte() {
+  if (!passbyteAllaProfiler.length) passbyteAllaProfiler = await fetchProfiles();
+  const { data, error } = await sb.from("pass_byte").select("*").order("created_at", { ascending: false });
+  passbyteCache = error ? [] : data;
+  await markPassbyteSomSedda();
+}
+
+async function markPassbyteSomSedda() {
+  const user = getCurrentUser();
+  if (!user) return;
+  const minGrupp = utbildningsgrupp(user.utbildning);
+  const relevanta = passbyteCache.filter(b => utbildningsgrupp((passbyteAllaProfiler.find(p => p.id === b.user_id) || {}).utbildning) === minGrupp);
+  const { data: sedda } = await sb.from("pass_byte_sedd").select("byte_id").eq("user_id", user.id);
+  const seddaIds = (sedda || []).map(s => s.byte_id);
+  const osedda = relevanta.filter(b => !seddaIds.includes(b.id));
+  if (!osedda.length) return;
+  await Promise.all(osedda.map(b => sb.from("pass_byte_sedd").insert({ byte_id: b.id, user_id: user.id, signum: user.signum })));
+}
+
+function renderPassbyteTab() {
+  const wrap = document.getElementById("passbyte-wrap");
+  if (!wrap) return;
+  const user = getCurrentUser();
+  const minGrupp = utbildningsgrupp(user.utbildning);
+  const relevanta = passbyteCache.filter(b => utbildningsgrupp((passbyteAllaProfiler.find(p => p.id === b.user_id) || {}).utbildning) === minGrupp);
+
+  wrap.innerHTML = `
+    <button class="btn-primary" onclick="openNyttPassbyteModal()">+ Lägg upp bytesönskan</button>
+    <div style="font-size:11px; color:var(--muted); margin-top:6px;">Synligt bara för din yrkesgrupp (Farmacevt, eller Apotekstekniker/Apoteksassistent).</div>
+    <div class="kassa-row-list" style="margin-top:16px;">
+      ${relevanta.length ? relevanta.map(b => {
+        const person = passbyteAllaProfiler.find(p => p.id === b.user_id);
+        const arAgare = b.user_id === user.id;
+        return `
+        <div class="kassa-row" style="align-items:flex-start; flex-wrap:wrap; cursor:pointer;" onclick="openPassbyteDetail('${b.id}')">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700; font-size:13px;">${person ? person.name : b.signum}${b.status === "avslutad" ? ` <span class="org-badge" style="background:var(--line); color:var(--muted); font-weight:800;">Avslutat</span>` : ""}</div>
+            <div style="font-size:12.5px; font-weight:700; margin-top:2px;">${(b.dagar || []).map(d => fmtSvShort(d)).join(", ")}</div>
+            ${b.fritext ? `<div style="font-size:11.5px; color:var(--muted); margin-top:2px;">${b.fritext}</div>` : ""}
+          </div>
+          ${(arAgare || isChef()) ? `<button class="kr-delete" onclick="event.stopPropagation(); deletePassbyte('${b.id}')" aria-label="Ta bort">✕</button>` : ""}
+        </div>
+      `;
+      }).join("") : `<div class="empty-state">Inga bytesönskningar just nu.</div>`}
+    </div>
+  `;
+}
+
+let nyttPassbyteDraft = null;
+function openNyttPassbyteModal() {
+  nyttPassbyteDraft = { dagar: [isoDate(new Date())], fritext: "", isEdit: false };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "nytt-passbyte-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Lägg upp bytesönskan</div><div id="nytt-passbyte-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderNyttPassbyteBody();
+}
+
+function renderNyttPassbyteBody() {
+  const d = nyttPassbyteDraft;
+  const wrap = document.getElementById("nytt-passbyte-body");
+  wrap.innerHTML = `
+      <div class="field-group">
+        <label class="field-label">Vilken eller vilka dagar</label>
+        ${d.dagar.map((dag, i) => `
+          <div style="display:flex; gap:6px; margin-bottom:6px;">
+            <button type="button" class="field-input kassa-date-btn" style="flex:1; text-align:left;" onclick="openPassbyteDagPicker(${i})">${fmtSvFull(dag)}</button>
+            ${d.dagar.length > 1 ? `<button type="button" onclick="taBortPassbyteDag(${i})" style="width:38px; border-radius:10px; border:1px solid var(--line); background:var(--white); color:#b3261e; cursor:pointer;">✕</button>` : ""}
+          </div>
+        `).join("")}
+        <a href="#" onclick="event.preventDefault(); leggTillPassbyteDag();" style="font-size:11.5px; font-weight:700; color:var(--green-700);">+ Lägg till fler dagar</a>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Kommentar (valfritt)</label>
+        <textarea class="field-input" id="passbyte-fritext" style="min-height:60px;" placeholder="T.ex. varför du vill byta..." oninput="nyttPassbyteDraft.fritext = this.value">${d.fritext}</textarea>
+      </div>
+      <div id="nytt-passbyte-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="${d.isEdit ? "saveEditPassbyte()" : "submitNyttPassbyte()"}">${d.isEdit ? "Spara ändringar" : "Lägg upp"}</button>
+      <button class="btn-secondary" onclick="document.getElementById('nytt-passbyte-overlay').remove()">Avbryt</button>
+  `;
+}
+
+function openPassbyteDagPicker(i) {
+  openGenericDatePicker(
+    () => nyttPassbyteDraft.dagar[i],
+    (iso) => { nyttPassbyteDraft.dagar[i] = iso; renderNyttPassbyteBody(); }
+  );
+}
+
+function leggTillPassbyteDag() {
+  nyttPassbyteDraft.dagar.push(isoDate(new Date()));
+  renderNyttPassbyteBody();
+}
+
+function taBortPassbyteDag(i) {
+  nyttPassbyteDraft.dagar.splice(i, 1);
+  renderNyttPassbyteBody();
+}
+
+async function submitNyttPassbyte() {
+  const d = nyttPassbyteDraft;
+  const errorBox = document.getElementById("nytt-passbyte-error");
+  if (!d.dagar.length) { errorBox.textContent = "Välj minst en dag."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("pass_byte").insert({
+    user_id: user.id, signum: user.signum, dagar: d.dagar, fritext: d.fritext.trim(),
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("nytt-passbyte-overlay");
+  if (overlay) overlay.remove();
+  await loadPassbyte();
+  renderPassbyteTab();
+}
+
+async function openPassbyteDetail(id) {
+  const b = passbyteCache.find(x => x.id === id);
+  if (!b) return;
+  const person = passbyteAllaProfiler.find(p => p.id === b.user_id);
+  const user = getCurrentUser();
+  const arAgare = b.user_id === user.id;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "passbyte-detalj-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${person ? person.name : b.signum}</div>
+      <div style="font-weight:700; font-size:13.5px;">${(b.dagar || []).map(dag => fmtSvShort(dag)).join(", ")}</div>
+      ${b.fritext ? `<div style="font-size:12.5px; color:var(--muted); margin-top:4px;">${b.fritext}</div>` : ""}
+      ${b.status === "avslutad" ? `<span class="org-badge" style="background:var(--line); color:var(--muted); font-weight:800; margin-top:8px;">Avslutat</span>` : ""}
+
+      <div class="kassa-section-title" style="margin-top:16px;">Kommentarer</div>
+      <div id="passbyte-kommentar-list"></div>
+      ${b.status !== "avslutad" ? `
+        <div class="field-group" style="margin-top:10px;">
+          <textarea class="field-input" id="passbyte-kommentar-text" style="min-height:56px;" placeholder="Svara med en kommentar..."></textarea>
+        </div>
+        <div id="passbyte-kommentar-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+        <button class="btn-primary" onclick="submitPassbyteKommentar('${b.id}')">Skicka kommentar</button>
+      ` : ""}
+
+      ${arAgare && b.status !== "avslutad" ? `<button class="btn-secondary" style="margin-top:12px;" onclick="avslutaPassbyte('${b.id}')">Avsluta bytet</button>` : ""}
+      ${(arAgare || isChef()) ? `<button class="btn-secondary" style="color:#b3261e;" onclick="openEditPassbyteModal('${b.id}')">Redigera</button>` : ""}
+      <button class="btn-secondary" onclick="document.getElementById('passbyte-detalj-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  await renderPassbyteKommentarList(id);
+}
+
+async function renderPassbyteKommentarList(byteId) {
+  const wrap = document.getElementById("passbyte-kommentar-list");
+  if (!wrap) return;
+  const { data } = await sb.from("pass_byte_kommentar").select("*").eq("byte_id", byteId).order("created_at", { ascending: true });
+  const kommentarer = data || [];
+  wrap.innerHTML = kommentarer.length
+    ? `<div class="kassa-row-list">${kommentarer.map(k => `
+        <div class="kassa-row" style="cursor:default; align-items:flex-start;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:12.5px;">${k.kommentar}</div>
+            <div style="font-size:10.5px; color:var(--muted); margin-top:2px;">${k.signum} · ${fmtSvShort(isoDate(new Date(k.created_at)))} ${fmtTime(new Date(k.created_at))}</div>
+          </div>
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">Inga kommentarer ännu.</div>`;
+}
+
+async function submitPassbyteKommentar(byteId) {
+  const kommentar = document.getElementById("passbyte-kommentar-text").value.trim();
+  const errorBox = document.getElementById("passbyte-kommentar-error");
+  if (!kommentar) { errorBox.textContent = "Skriv en kommentar."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Skickar…";
+  const { error } = await sb.from("pass_byte_kommentar").insert({ byte_id: byteId, kommentar, signum: user.signum, created_by: user.id });
+  if (error) { errorBox.textContent = "Kunde inte skicka: " + error.message; return; }
+  document.getElementById("passbyte-kommentar-text").value = "";
+  errorBox.textContent = "";
+  await renderPassbyteKommentarList(byteId);
+}
+
+async function avslutaPassbyte(id) {
+  const { error } = await sb.from("pass_byte").update({ status: "avslutad" }).eq("id", id);
+  if (error) { alert("Kunde inte avsluta: " + error.message); return; }
+  const overlay = document.getElementById("passbyte-detalj-overlay");
+  if (overlay) overlay.remove();
+  await loadPassbyte();
+  renderPassbyteTab();
+}
+
+function openEditPassbyteModal(id) {
+  const b = passbyteCache.find(x => x.id === id);
+  if (!b) return;
+  nyttPassbyteDraft = { id, dagar: b.dagar && b.dagar.length ? [...b.dagar] : [isoDate(new Date())], fritext: b.fritext || "", isEdit: true };
+  const detaljOverlay = document.getElementById("passbyte-detalj-overlay");
+  if (detaljOverlay) detaljOverlay.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "nytt-passbyte-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Redigera bytesönskan</div><div id="nytt-passbyte-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderNyttPassbyteBody();
+}
+
+async function saveEditPassbyte() {
+  const d = nyttPassbyteDraft;
+  const errorBox = document.getElementById("nytt-passbyte-error");
+  if (!d.dagar.length) { errorBox.textContent = "Välj minst en dag."; return; }
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("pass_byte").update({ dagar: d.dagar, fritext: d.fritext.trim() }).eq("id", d.id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("nytt-passbyte-overlay");
+  if (overlay) overlay.remove();
+  await loadPassbyte();
+  renderPassbyteTab();
+}
+
+function deletePassbyte(id) {
+  confirmDelete(
+    "Ta bort bytesönskan?",
+    "Bytesönskan tas bort permanent, inklusive alla kommentarer. Det går inte att ångra.",
+    async () => {
+      const { error } = await sb.from("pass_byte").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadPassbyte();
+      renderPassbyteTab();
     }
   );
 }
@@ -9848,6 +10099,8 @@ async function renderTodayWidget(user) {
     inkopTilldeladeRes,
     kvalitetspunkterRes,
     kvalitetspunktLastMinaRes,
+    passbyteRes,
+    passbyteSeddMinaRes,
   ] = await Promise.all([
     loadFranvaroCache(),
     sb.from("tilldelade_uppgifter").select("*").or(`target_user_id.eq.${user.id},target_user_id.is.null`).eq("is_done", false).eq("aterkommande", false).order("deadline", { ascending: true }),
@@ -9866,6 +10119,8 @@ async function renderTodayWidget(user) {
     sb.from("inkop").select("*").eq("tilldelad_till", user.id).eq("bestalld", false),
     sb.from("kvalitetspunkter").select("id"),
     sb.from("kvalitetspunkt_last").select("punkt_id").eq("user_id", user.id),
+    sb.from("pass_byte").select("id, user_id, status").eq("status", "oppen"),
+    sb.from("pass_byte_sedd").select("byte_id").eq("user_id", user.id),
   ]);
 
   notisSnoozeMap = {};
@@ -9922,6 +10177,22 @@ async function renderTodayWidget(user) {
     noticeBlocks.push(`
       <div onclick="showKvalitet().then(() => showKvalitetspunkter())" style="cursor:pointer; background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:6px 10px; margin-bottom:4px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
         <span style="flex:1;">📋 ${olastaAntal} ny${olastaAntal === 1 ? "" : "a"} kvalitetspunkt${olastaAntal === 1 ? "" : "er"} att läsa</span>
+      </div>
+    `);
+  }
+
+  const minGrupp = utbildningsgrupp(user.utbildning);
+  const passbyteAlla = passbyteRes.data || [];
+  const passbyteSeddaIds = (passbyteSeddMinaRes.data || []).map(s => s.byte_id);
+  const passbyteOlasta = passbyteAlla.filter(b => {
+    if (b.user_id === user.id) return false; // ska inte notifieras om sin egen
+    const poster = allProfilesForToday.find(p => p.id === b.user_id);
+    return utbildningsgrupp(poster ? poster.utbildning : null) === minGrupp && !passbyteSeddaIds.includes(b.id);
+  });
+  if (passbyteOlasta.length > 0) {
+    noticeBlocks.push(`
+      <div onclick="showLedighet().then(() => setLedighetTab('byte'))" style="cursor:pointer; background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:6px 10px; margin-bottom:4px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
+        <span style="flex:1;">🔄 ${passbyteOlasta.length} ny${passbyteOlasta.length === 1 ? "" : "a"} bytesönskan${passbyteOlasta.length === 1 ? "" : "ar"} av pass</span>
       </div>
     `);
   }
