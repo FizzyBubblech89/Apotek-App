@@ -4084,6 +4084,25 @@ function renderInkopView() {
   renderInkopList();
 }
 
+function visaInkopBild(orderId) {
+  const order = inkopCache.find(o => o.id === orderId);
+  if (!order || !order.mall_id) return;
+  const mall = inkopMallarCache.find(m => m.id === order.mall_id);
+  if (!mall || !mall.bild_url) return;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "inkop-bild-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card" style="text-align:center;">
+      <div class="kassa-modal-title" style="justify-content:center;">${order.vad}</div>
+      <img src="${mall.bild_url}" style="width:100%; border-radius:14px;">
+      <button class="btn-secondary" style="margin-top:14px;" onclick="document.getElementById('inkop-bild-overlay').remove()">Stäng</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
 function renderInkopList() {
   const listWrap = document.getElementById("inkop-list");
   if (!listWrap) return;
@@ -4092,11 +4111,14 @@ function renderInkopList() {
     .filter(i => inkopMatchesSearch(i, inkopSearchQuery));
 
   listWrap.innerHTML = filtered.length
-    ? `<div class="kassa-row-list">${filtered.map(i => `
+    ? `<div class="kassa-row-list">${filtered.map(i => {
+        const kopplatMall = i.mall_id ? inkopMallarCache.find(m => m.id === i.mall_id) : null;
+        const harBild = kopplatMall && kopplatMall.bild_url;
+        return `
         <div class="kassa-row" style="align-items:flex-start;">
           <input type="checkbox" ${i.bestalld ? "checked" : ""} onchange="toggleInkopBestalld('${i.id}', this.checked)" style="margin-top:2px;">
-          <div style="flex:1; min-width:0; margin-left:8px;">
-            <div style="font-weight:700; ${i.bestalld ? "text-decoration:line-through; color:var(--muted);" : ""}">${i.vad}</div>
+          <div style="flex:1; min-width:0; margin-left:8px; ${harBild ? "cursor:pointer;" : ""}" ${harBild ? `onclick="visaInkopBild('${i.id}')"` : ""}>
+            <div style="font-weight:700; ${i.bestalld ? "text-decoration:line-through; color:var(--muted);" : ""}">${i.vad}${harBild ? ` <span style="font-size:11px;">📷</span>` : ""}</div>
             <div style="font-size:11px; color:var(--muted); margin-top:2px;">
               ${i.vnr ? `VNR ${i.vnr} · ` : ""}Antal: ${i.antal}${i.bestalld && i.bestalld_datum ? ` · Beställt ${fmtSvShort(i.bestalld_datum)}` : ""}
               ${i.lank ? ` · <a href="${i.lank}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--green-700); font-weight:700;">🔗 Beställningssida</a>` : ""}
@@ -4105,7 +4127,8 @@ function renderInkopList() {
           </div>
           <button class="kr-delete" onclick="deleteInkop('${i.id}')" aria-label="Ta bort">✕</button>
         </div>
-      `).join("")}</div>`
+      `;
+      }).join("")}</div>`
     : `<div class="empty-state">${inkopSearchQuery ? "Inga träffar." : (inkopTab === "bestallt" ? "Inget beställt ännu." : "Inget att beställa just nu.")}</div>`;
 }
 
@@ -4130,6 +4153,10 @@ function openNewInkopModal() {
       <div class="field-group">
         <label class="field-label">Vad ska beställas?</label>
         <input class="field-input" id="inkop-vad-input" type="text" value="${inkopDraft.vad}" oninput="inkopDraft.vad = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">VNR (valfritt)</label>
+        <input class="field-input" id="inkop-vnr-input" type="text" inputmode="numeric" value="${inkopDraft.vnr}" oninput="inkopDraft.vnr = this.value">
       </div>
       <div class="field-group">
         <label class="field-label">Antal</label>
@@ -4181,6 +4208,8 @@ function selectInkopMall(mallId) {
   inkopDraft.valdMallId = mallId;
   const input = document.getElementById("inkop-vad-input");
   if (input) input.value = mall.namn;
+  const vnrInput = document.getElementById("inkop-vnr-input");
+  if (vnrInput) vnrInput.value = mall.vnr || "";
   const previewWrap = document.getElementById("inkop-vald-mall-preview");
   if (previewWrap) {
     previewWrap.innerHTML = `
@@ -4205,6 +4234,7 @@ async function submitInkop() {
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("inkop").insert({
     vad: inkopDraft.vad.trim(), antal: inkopDraft.antal || 1, lank: inkopDraft.lank || "", vnr: inkopDraft.vnr || "",
+    mall_id: inkopDraft.valdMallId || null,
     tilldelad_till: vald ? vald.tilldelad_till : null, anteckning: inkopDraft.anteckning || "", created_by: user.id,
   });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
