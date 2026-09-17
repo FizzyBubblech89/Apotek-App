@@ -42,17 +42,28 @@
     --btn-primary-gradient: linear-gradient(120deg, var(--green-600), var(--accent-teal-b));
   }
   [data-theme="dark"] {
-    --green-100: rgba(52,211,153,0.16);
-    --green-050: rgba(52,211,153,0.09);
-    --white: #16211c;
-    --ink: #eaf6ef;
-    --muted: #93a89e;
-    --line: #26362f;
-    --shadow: 0 2px 10px rgba(0,0,0,0.35);
-    --shadow-md: 0 6px 18px rgba(0,0,0,0.4);
-    --shadow-lg: 0 10px 32px rgba(0,0,0,0.5);
-    --body-gradient: linear-gradient(160deg, #0d1420 0%, #1b1633 32%, #142229 66%, #0b1f18 100%);
+    /* De gröna nyanserna används inte bara som bakgrunder utan även
+       som TEXTFÄRG på över 80 ställen i appen (länkar, aktiva flikar,
+       badges). Tidigare ärvdes de ljusa temats mörkgröna värden rakt
+       av, vilket gav nästan oläslig mörkgrön text på mörk bakgrund —
+       troligen den största enskilda orsaken till att mörkt läge
+       kändes dåligt. Ljusa, mättade gröna nyanser löser det. */
+    --green-700: #34d399;
+    --green-600: #2dd4bf;
+    --green-500: #4ade80;
+    --green-300: #86efac;
+    --green-100: rgba(52,211,153,0.18);
+    --green-050: rgba(52,211,153,0.10);
+    --white: #1a222c;
+    --ink: #eef3f6;
+    --muted: #92a0ad;
+    --line: #323f4c;
+    --shadow: 0 2px 12px rgba(0,0,0,0.4);
+    --shadow-md: 0 8px 22px rgba(0,0,0,0.45);
+    --shadow-lg: 0 14px 36px rgba(0,0,0,0.55);
+    --body-gradient: linear-gradient(160deg, #0a0f16 0%, #171330 30%, #0f1f26 62%, #081a15 100%);
   }
+  [data-theme="dark"] img { filter: brightness(0.92); }
   [data-theme="dark"] body { background: var(--body-gradient); background-attachment: fixed; }
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
@@ -75,11 +86,13 @@
      rörs inte alls under 768px bred skärm. */
   @media (min-width: 640px) {
     body { display: flex; justify-content: center; }
-    .app { max-width: 820px; box-shadow: 0 0 60px rgba(11,61,46,0.12); min-height: 100vh; }
+    .app { max-width: min(92vw, 1040px); box-shadow: 0 0 60px rgba(11,61,46,0.12); min-height: 100vh; }
     .btn-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-  }
-  @media (min-width: 1000px) {
-    .app { max-width: 1040px; }
+    /* Läsbredden på undersidor (listor, formulär) hålls bekväm och
+       centrerad även när appskalet självt är brett — annars ser
+       enkla listvyer ojämnt utsträckta ut jämfört med hemskärmens
+       rutnät, vilket är vad som gjorde datorversionen kännas ojämn. */
+    .kassa-content { max-width: 720px; margin: 0 auto; width: 100%; }
   }
   .app::before, .app::after {
     content: ""; position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; z-index: 0;
@@ -178,8 +191,6 @@
   .nav-card::before {
     content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
     background: linear-gradient(90deg, var(--accent-purple-a), var(--accent-blue-a), var(--accent-teal-a), var(--accent-amber-a), var(--accent-pink-a));
-  }
-    text-align: left;
   }
   .nav-card:hover:not(.disabled) { transform: translateY(-3px); box-shadow: 0 12px 24px rgba(11,61,46,0.14); }
   .nav-card:active:not(.disabled) { transform: translateY(-1px) scale(0.97); }
@@ -1236,11 +1247,12 @@ async function renderHomeForUser(user) {
   }
 
   const isChef = user.role === "chef";
-  const [ideaBadgeCount, kassaFlaggedRes, tasksCountRes, unseenUtbildningCount] = await Promise.all([
+  const [ideaBadgeCount, kassaFlaggedRes, tasksCountRes, unseenUtbildningCount, pagaendeReklamRes] = await Promise.all([
     isChef ? fetchUnhandledIdeaCount() : fetchUnseenFeedbackCount(),
     isChef ? sb.from("kassaredovisningar").select("id, kassadifferens").eq("granskad", false) : Promise.resolve({ data: [] }),
     !isChef ? sb.from("tilldelade_uppgifter").select("id").eq("target_user_id", user.id).eq("is_done", false) : Promise.resolve({ data: [] }),
     fetchUnseenUtbildningCount(),
+    sb.from("reklamationer").select("id").eq("hanterad", false),
   ]);
 
   const ideasCardWrap = document.getElementById("nav-card-ideas");
@@ -1306,12 +1318,12 @@ async function renderHomeForUser(user) {
   const reklamationCardWrap = document.getElementById("nav-card-reklamation");
   if (reklamationCardWrap) {
     reklamationCardWrap.innerHTML = `
-      <div class="nav-card" onclick="showReklamation()">
+      <div class="nav-card ${(pagaendeReklamRes.data || []).length > 0 ? "nav-card-alert" : ""}" onclick="showReklamation()">
         <div class="nav-icon nav-icon-c4">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 3H15L21 9V19C21 20.1 20.1 21 19 21H5C3.9 21 3 20.1 3 19V5C3 3.9 3.9 3 5 3H9Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 3V9H15" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 13H16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M8 17H13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </div>
         <div class="nav-label">Reklamation</div>
-        <div class="nav-sub">Registrera & hantera</div>
+        <div class="nav-sub">${(pagaendeReklamRes.data || []).length > 0 ? `${pagaendeReklamRes.data.length} pågående` : "Registrera & hantera"}</div>
       </div>
     `;
   }
@@ -4052,6 +4064,7 @@ async function loadInkop() {
   ]);
   inkopCache = inkopRes.data || [];
   inkopMallarCache = mallarRes.data || [];
+  if (!inkopMallarAllaProfiler.length) inkopMallarAllaProfiler = await fetchProfiles();
 }
 
 function setInkopTab(tab) {
@@ -4084,23 +4097,72 @@ function renderInkopView() {
   renderInkopList();
 }
 
-function visaInkopBild(orderId) {
-  const order = inkopCache.find(o => o.id === orderId);
-  if (!order || !order.mall_id) return;
-  const mall = inkopMallarCache.find(m => m.id === order.mall_id);
-  if (!mall || !mall.bild_url) return;
+async function openInkopDetail(id) {
+  const order = inkopCache.find(o => o.id === id);
+  if (!order) return;
+  const kopplatMall = order.mall_id ? inkopMallarCache.find(m => m.id === order.mall_id) : null;
+  const laggsTillAv = inkopMallarAllaProfiler.find(p => p.id === order.created_by);
+  const bockatAv = order.bestalld_av ? inkopMallarAllaProfiler.find(p => p.id === order.bestalld_av) : null;
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
-  overlay.id = "inkop-bild-overlay";
+  overlay.id = "inkop-detalj-overlay";
   overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
-    <div class="kassa-modal-card" style="text-align:center;">
-      <div class="kassa-modal-title" style="justify-content:center;">${order.vad}</div>
-      <img src="${mall.bild_url}" style="width:100%; border-radius:14px;">
-      <button class="btn-secondary" style="margin-top:14px;" onclick="document.getElementById('inkop-bild-overlay').remove()">Stäng</button>
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${order.vad}</div>
+      ${kopplatMall && kopplatMall.bild_url ? `<img src="${kopplatMall.bild_url}" style="width:100%; border-radius:14px; margin-bottom:10px;">` : ""}
+      <div style="font-size:12.5px; color:var(--muted);">
+        ${order.vnr ? `VNR ${order.vnr} · ` : ""}Antal: ${order.antal}
+      </div>
+      <div style="font-size:11.5px; color:var(--muted); margin-top:4px;">
+        Lades till av ${laggsTillAv ? laggsTillAv.name : "okänd"} · ${fmtSvShort(isoDate(new Date(order.created_at)))}
+        ${order.bestalld && bockatAv ? `<br>Bockat av ${bockatAv.name}${order.bestalld_datum ? ` · ${fmtSvShort(order.bestalld_datum)}` : ""}` : ""}
+      </div>
+      ${order.anteckning ? `<div style="font-size:12.5px; margin-top:8px; font-style:italic;">${order.anteckning}</div>` : ""}
+      ${order.lank ? `<a href="${order.lank}" target="_blank" rel="noopener" style="display:block; margin-top:8px; color:var(--green-700); font-weight:700; font-size:12.5px;">🔗 Beställningssida</a>` : ""}
+
+      <div class="kassa-section-title" style="margin-top:16px;">Kommentarer</div>
+      <div id="inkop-kommentar-list"></div>
+      <div class="field-group" style="margin-top:10px;">
+        <textarea class="field-input" id="inkop-kommentar-text" style="min-height:56px;" placeholder="Lägg en kommentar..."></textarea>
+      </div>
+      <div id="inkop-kommentar-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitInkopKommentar('${id}')">Skicka kommentar</button>
+      <button class="btn-secondary" onclick="document.getElementById('inkop-detalj-overlay').remove()">Stäng</button>
     </div>
   `;
   document.body.appendChild(overlay);
+  await renderInkopKommentarList(id);
+}
+
+async function renderInkopKommentarList(inkopId) {
+  const wrap = document.getElementById("inkop-kommentar-list");
+  if (!wrap) return;
+  const { data } = await sb.from("inkop_kommentar").select("*").eq("inkop_id", inkopId).order("created_at", { ascending: true });
+  const kommentarer = data || [];
+  wrap.innerHTML = kommentarer.length
+    ? `<div class="kassa-row-list">${kommentarer.map(k => `
+        <div class="kassa-row" style="cursor:default; align-items:flex-start;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:12.5px;">${k.kommentar}</div>
+            <div style="font-size:10.5px; color:var(--muted); margin-top:2px;">${k.signum} · ${fmtSvShort(isoDate(new Date(k.created_at)))} ${fmtTime(new Date(k.created_at))}</div>
+          </div>
+        </div>
+      `).join("")}</div>`
+    : `<div class="empty-state">Inga kommentarer ännu.</div>`;
+}
+
+async function submitInkopKommentar(inkopId) {
+  const kommentar = document.getElementById("inkop-kommentar-text").value.trim();
+  const errorBox = document.getElementById("inkop-kommentar-error");
+  if (!kommentar) { errorBox.textContent = "Skriv en kommentar."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Skickar…";
+  const { error } = await sb.from("inkop_kommentar").insert({ inkop_id: inkopId, kommentar, signum: user.signum, created_by: user.id });
+  if (error) { errorBox.textContent = "Kunde inte skicka: " + error.message; return; }
+  document.getElementById("inkop-kommentar-text").value = "";
+  errorBox.textContent = "";
+  await renderInkopKommentarList(inkopId);
 }
 
 function renderInkopList() {
@@ -4114,14 +4176,20 @@ function renderInkopList() {
     ? `<div class="kassa-row-list">${filtered.map(i => {
         const kopplatMall = i.mall_id ? inkopMallarCache.find(m => m.id === i.mall_id) : null;
         const harBild = kopplatMall && kopplatMall.bild_url;
+        const laggsTillAv = inkopMallarAllaProfiler.find(p => p.id === i.created_by);
+        const bockatAv = i.bestalld_av ? inkopMallarAllaProfiler.find(p => p.id === i.bestalld_av) : null;
         return `
         <div class="kassa-row" style="align-items:flex-start;">
-          <input type="checkbox" ${i.bestalld ? "checked" : ""} onchange="toggleInkopBestalld('${i.id}', this.checked)" style="margin-top:2px;">
-          <div style="flex:1; min-width:0; margin-left:8px; ${harBild ? "cursor:pointer;" : ""}" ${harBild ? `onclick="visaInkopBild('${i.id}')"` : ""}>
+          <input type="checkbox" ${i.bestalld ? "checked" : ""} onchange="event.stopPropagation(); toggleInkopBestalld('${i.id}', this.checked)" style="margin-top:2px;">
+          <div style="flex:1; min-width:0; margin-left:8px; cursor:pointer;" onclick="openInkopDetail('${i.id}')">
             <div style="font-weight:700; ${i.bestalld ? "text-decoration:line-through; color:var(--muted);" : ""}">${i.vad}${harBild ? ` <span style="font-size:11px;">📷</span>` : ""}</div>
             <div style="font-size:11px; color:var(--muted); margin-top:2px;">
-              ${i.vnr ? `VNR ${i.vnr} · ` : ""}Antal: ${i.antal}${i.bestalld && i.bestalld_datum ? ` · Beställt ${fmtSvShort(i.bestalld_datum)}` : ""}
+              ${i.vnr ? `VNR ${i.vnr} · ` : ""}Antal: ${i.antal}
               ${i.lank ? ` · <a href="${i.lank}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--green-700); font-weight:700;">🔗 Beställningssida</a>` : ""}
+            </div>
+            <div style="font-size:10.5px; color:var(--muted); margin-top:2px;">
+              Lades till av ${laggsTillAv ? laggsTillAv.name : "okänd"}
+              ${i.bestalld && bockatAv ? ` · Bockat av ${bockatAv.name}${i.bestalld_datum ? ` (${fmtSvShort(i.bestalld_datum)})` : ""}` : ""}
             </div>
             ${i.anteckning ? `<div style="font-size:11px; color:var(--muted); margin-top:2px; font-style:italic;">${i.anteckning}</div>` : ""}
           </div>
@@ -7865,7 +7933,7 @@ async function runGlobalSearch(query) {
     { titel: "Lageravvikelser", icon: "📉", data: lagerRes.data || [], text: r => r.fritext || r.vnr || "VNR " + r.vnr, action: () => showLagerAvvikelser() },
     { titel: "Uppgifter", icon: "✅", data: uppgRes.data || [], text: r => r.text, action: () => showTasks() },
     { titel: "Övrigt", icon: "🔗", data: lankRes.data || [], text: r => r.namn, action: () => showOvrigt() },
-    { titel: "Personer", icon: "👤", data: profilRes.data || [], text: r => r.name, action: () => showUsers() },
+    { titel: "Personer", icon: "👤", data: profilRes.data || [], text: r => r.name, action: () => showOrgChart() },
   ].filter(g => g.data.length);
 
   if (!grupper.length) { resultsWrap.innerHTML = `<div class="empty-state">Inga träffar för "${query}".</div>`; return; }
