@@ -1915,7 +1915,27 @@ function orgCardHtml(u) {
   `;
 }
 
-function openOrgPersonDetail(id) {
+function prestationBarHtml(kategori, antal, medaljNivaer) {
+  const meta = PRESTATION_KATEGORIER[kategori];
+  const nastaNiva = PRESTATION_NIVAER.find(n => n > antal) || null;
+  const foregNiva = [...PRESTATION_NIVAER].reverse().find(n => n <= antal) || 0;
+  const spann = nastaNiva ? nastaNiva - foregNiva : 1;
+  const framsteg = nastaNiva ? Math.min(100, Math.round(((antal - foregNiva) / spann) * 100)) : 100;
+  return `
+    <div style="margin-bottom:14px; text-align:left;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <span style="font-size:12.5px; font-weight:700;">${meta.ikon} ${meta.namn}</span>
+        <span style="font-size:11px; color:var(--muted);">${antal}${nastaNiva ? ` / ${nastaNiva}` : " (max)"}</span>
+      </div>
+      <div style="height:8px; background:var(--line); border-radius:999px; overflow:hidden;">
+        <div style="height:100%; width:${framsteg}%; background:linear-gradient(90deg, var(--green-600), var(--green-700)); border-radius:999px;"></div>
+      </div>
+      ${medaljNivaer.length ? `<div style="font-size:10.5px; color:var(--muted); margin-top:3px;">🏅 ${medaljNivaer.length} medalj${medaljNivaer.length === 1 ? "" : "er"} (senast: nivå ${Math.max(...medaljNivaer)})</div>` : ""}
+    </div>
+  `;
+}
+
+async function openOrgPersonDetail(id) {
   const u = orgChartUsersCache.find(x => x.id === id);
   if (!u) return;
   const badges = [
@@ -1925,6 +1945,17 @@ function openOrgPersonDetail(id) {
   const avatar = u.avatar_url
     ? `<img src="${u.avatar_url}" style="width:100%; height:100%; object-fit:cover;">`
     : (u.name || "?").charAt(0).toUpperCase();
+
+  const kategorier = Object.keys(PRESTATION_KATEGORIER);
+  const [antalPerKategori, { data: allaMedaljer }] = await Promise.all([
+    Promise.all(kategorier.map(k => raknaPrestation(u.id, k))),
+    sb.from("prestationer").select("kategori, niva").eq("user_id", u.id),
+  ]);
+  const prestationHtml = kategorier.map((k, i) => {
+    const medaljNivaer = (allaMedaljer || []).filter(m => m.kategori === k).map(m => m.niva);
+    return prestationBarHtml(k, antalPerKategori[i], medaljNivaer);
+  }).join("");
+
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "org-person-overlay";
@@ -1945,7 +1976,11 @@ function openOrgPersonDetail(id) {
           ${u.anhorig_telefon ? `<a href="tel:${u.anhorig_telefon.replace(/[^0-9+]/g, "")}" style="display:block; color:var(--green-700); font-weight:700; text-decoration:none; margin-top:2px;">📞 ${u.anhorig_telefon}</a>` : ""}
         </div>
       ` : ""}
-      <button class="btn-secondary" style="margin-top:18px;" onclick="document.getElementById('org-person-overlay').remove()">Stäng</button>
+      <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--line);">
+        <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px; text-align:left;">Prestationer</div>
+        ${prestationHtml}
+      </div>
+      <button class="btn-secondary" style="margin-top:8px;" onclick="document.getElementById('org-person-overlay').remove()">Stäng</button>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -2227,6 +2262,7 @@ async function submitIdeaHandling(id) {
   }
   const { error } = await sb.from("ideer").update(patch).eq("id", id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  if (isHandled && idea && !idea.is_anonymous) await kollaOchTilldelaMedalj(idea.user_id, "ideer");
 
   const overlay = document.getElementById("idea-handle-overlay");
   if (overlay) overlay.remove();
@@ -3528,11 +3564,75 @@ function teamLeaderboardFor(traningId) {
    där lag med fler än en medlem visas som "Lag X" (utan enskilda ansikten),
    men en person utan lag — eller ensam i sitt lag — visas med sin egen
    profilbild och sitt namn. */
+/* ---- Prestationer (medaljer & progressbars) ---- */
+const PRESTATION_KATEGORIER = {
+  saljtavling: { namn: "Vunna säljtävlingar", ikon: "🏆" },
+  passbyte_hjalp: { namn: "Hjälpt vid byte av pass", ikon: "🔄" },
+  ideer: { namn: "Nya idéer", ikon: "💡" },
+  reklamation: { namn: "Inlagda reklamationer", ikon: "📦" },
+  utbildning: { namn: "Deltagit i utbildningar", ikon: "🎓" },
+};
+const PRESTATION_NIVAER = [1, 3, 5, 10, 20, 50, 100, 1000];
+
+async function raknaPrestation(userId, kategori) {
+  let query;
+  if (kategori === "saljtavling") query = sb.from("saljtavling_vinster").select("id").eq("user_id", userId);
+  else if (kategori === "ideer") query = sb.from("ideer").select("id").eq("user_id", userId).eq("is_anonymous", false).eq("handled", true);
+  else if (kategori === "reklamation") query = sb.from("reklamationer").select("id").eq("created_by", userId).eq("hanterad", true);
+  else if (kategori === "utbildning") query = sb.from("utbildning_deltagare").select("id").eq("user_id", userId);
+  else if (kategori === "passbyte_hjalp") {
+    const { data } = await sb.from("pass_byte_kommentar").select("byte_id, created_by").eq("created_by", userId);
+    if (!data || !data.length) return 0;
+    const byteIds = [...new Set(data.map(k => k.byte_id))];
+    const { data: byten } = await sb.from("pass_byte").select("id, user_id").in("id", byteIds);
+    return (byten || []).filter(b => b.user_id !== userId).length;
+  }
+  else return 0;
+  const { data, error } = await query;
+  if (error) { console.error(error); return 0; }
+  return data.length;
+}
+
+async function kollaOchTilldelaMedalj(userId, kategori) {
+  const antal = await raknaPrestation(userId, kategori);
+  const { data: befintliga } = await sb.from("prestationer").select("niva").eq("user_id", userId).eq("kategori", kategori);
+  const befintligaNivaer = (befintliga || []).map(p => p.niva);
+  const nya = PRESTATION_NIVAER.filter(n => n <= antal && !befintligaNivaer.includes(n));
+  for (const niva of nya) {
+    await sb.from("prestationer").insert({ user_id: userId, kategori, niva });
+  }
+  return nya;
+}
+
+let saljtavlingVinnareKollade = null; // sessionsflagga — kolla bara en gång per session
+async function checkAvslutadeSaljtavlingar() {
+  const idag = isoDate(new Date());
+  if (saljtavlingVinnareKollade === idag) return;
+  saljtavlingVinnareKollade = idag;
+
+  if (!traningarCache.length) return;
+  const avslutade = traningarCache.filter(t => t.slut_datum < idag);
+  if (!avslutade.length) return;
+
+  const { data: redanTilldelade } = await sb.from("saljtavling_vinster").select("traning_id");
+  const tilldeladeIds = (redanTilldelade || []).map(v => v.traning_id);
+
+  for (const t of avslutade) {
+    if (tilldeladeIds.includes(t.id)) continue;
+    const board = leaderboardFor(t.id);
+    if (!board.length || board[0].total <= 0) continue;
+    const vinnare = board[0];
+    const { error } = await sb.from("saljtavling_vinster").insert({ traning_id: t.id, user_id: vinnare.user_id });
+    if (!error) await kollaOchTilldelaMedalj(vinnare.user_id, "saljtavling");
+  }
+}
+
 async function showTraning() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-traning").style.display = "block";
   traningTab = "pagaende";
   await loadTraningData();
+  await checkAvslutadeSaljtavlingar();
   renderTraning();
 }
 
@@ -6620,6 +6720,8 @@ async function submitPassbyteKommentar(byteId) {
   errorBox.textContent = "Skickar…";
   const { error } = await sb.from("pass_byte_kommentar").insert({ byte_id: byteId, kommentar, signum: user.signum, created_by: user.id });
   if (error) { errorBox.textContent = "Kunde inte skicka: " + error.message; return; }
+  const byte = passbyteCache.find(b => b.id === byteId);
+  if (byte && byte.user_id !== user.id) await kollaOchTilldelaMedalj(user.id, "passbyte_hjalp");
   document.getElementById("passbyte-kommentar-text").value = "";
   errorBox.textContent = "";
   await renderPassbyteKommentarList(byteId);
@@ -8135,6 +8237,7 @@ async function toggleUtbildningDeltagande(utbildningId, checked) {
   if (checked) {
     const { error } = await sb.from("utbildning_deltagare").insert({ utbildning_id: utbildningId, user_id: user.id, signum: user.signum });
     if (error) { alert("Kunde inte anmäla: " + error.message); return; }
+    await kollaOchTilldelaMedalj(user.id, "utbildning");
   } else {
     const { error } = await sb.from("utbildning_deltagare").delete().eq("utbildning_id", utbildningId).eq("user_id", user.id);
     if (error) { alert("Kunde inte avanmäla: " + error.message); return; }
@@ -9580,6 +9683,8 @@ async function saveReklamationDetail(id) {
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("reklamationer").update(patch).eq("id", id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const r = reklamationCache.find(x => x.id === id);
+  if (patch.hanterad && r && r.created_by) await kollaOchTilldelaMedalj(r.created_by, "reklamation");
   const overlay = document.getElementById("reklamation-detail-overlay");
   if (overlay) overlay.remove();
   await loadReklamationer();
@@ -10254,6 +10359,7 @@ async function renderTodayWidget(user) {
     kvalitetspunktLastMinaRes,
     passbyteRes,
     passbyteSeddMinaRes,
+    nyaPrestationerRes,
   ] = await Promise.all([
     loadFranvaroCache(),
     sb.from("tilldelade_uppgifter").select("*").or(`target_user_id.eq.${user.id},target_user_id.is.null`).eq("is_done", false).eq("aterkommande", false).order("deadline", { ascending: true }),
@@ -10274,6 +10380,7 @@ async function renderTodayWidget(user) {
     sb.from("kvalitetspunkt_last").select("punkt_id").eq("user_id", user.id),
     sb.from("pass_byte").select("id, user_id, status").eq("status", "oppen"),
     sb.from("pass_byte_sedd").select("byte_id").eq("user_id", user.id),
+    sb.from("prestationer").select("*").eq("user_id", user.id).gte("earned_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
   ]);
 
   notisSnoozeMap = {};
@@ -10341,6 +10448,16 @@ async function renderTodayWidget(user) {
       </div>
     `);
   }
+
+  (nyaPrestationerRes.data || []).forEach(p => {
+    const meta = PRESTATION_KATEGORIER[p.kategori];
+    if (!meta) return;
+    noticeBlocks.push(`
+      <div style="background:linear-gradient(150deg, #fff3e6, #ffe8d1); border:1px solid #f3b989; border-radius:12px; padding:8px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+        <span style="flex:1;">🏅 Grattis! Du nådde ${p.niva} ${meta.namn.toLowerCase()}</span>
+      </div>
+    `);
+  });
 
   const inkopTilldelade = inkopTilldeladeRes.data || [];
   inkopTilldelade.forEach(i => {
