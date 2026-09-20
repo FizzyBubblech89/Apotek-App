@@ -4112,7 +4112,7 @@ async function openInkopDetail(id) {
   overlay.innerHTML = `
     <div class="kassa-modal-card">
       <div class="kassa-modal-title">${order.vad}</div>
-      ${kopplatMall && kopplatMall.bild_url ? `<img src="${kopplatMall.bild_url}" style="width:100%; border-radius:14px; margin-bottom:10px;">` : ""}
+      ${order.bild_url || (kopplatMall && kopplatMall.bild_url) ? `<img src="${order.bild_url || kopplatMall.bild_url}" style="width:100%; border-radius:14px; margin-bottom:10px;">` : ""}
       <div style="font-size:12.5px; color:var(--muted);">
         ${order.vnr ? `VNR ${order.vnr} · ` : ""}Antal: ${order.antal}
       </div>
@@ -4177,7 +4177,7 @@ function renderInkopList() {
   listWrap.innerHTML = filtered.length
     ? `<div class="kassa-row-list">${filtered.map(i => {
         const kopplatMall = i.mall_id ? inkopMallarCache.find(m => m.id === i.mall_id) : null;
-        const harBild = kopplatMall && kopplatMall.bild_url;
+        const harBild = i.bild_url || (kopplatMall && kopplatMall.bild_url);
         const laggsTillAv = inkopMallarAllaProfiler.find(p => p.id === i.created_by);
         const bockatAv = i.bestalld_av ? inkopMallarAllaProfiler.find(p => p.id === i.bestalld_av) : null;
         return `
@@ -4203,7 +4203,7 @@ function renderInkopList() {
 }
 
 function openNewInkopModal() {
-  inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null, anteckning: "", vnr: "" };
+  inkopDraft = { vad: "", antal: 1, lank: "", valdMallId: null, anteckning: "", vnr: "", bildFile: null };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "inkop-new-overlay";
@@ -4236,12 +4236,27 @@ function openNewInkopModal() {
         <label class="field-label">Anteckning (valfritt)</label>
         <textarea class="field-input" id="inkop-anteckning-input" style="min-height:60px;" placeholder="T.ex. varför det behövs, hur bråttom det är..." oninput="inkopDraft.anteckning = this.value"></textarea>
       </div>
+      <div class="field-group">
+        <label class="field-label">Bild på varan (valfritt)</label>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn-secondary" style="flex:1; margin-top:0;" onclick="document.getElementById('inkop-bild-input').removeAttribute('capture'); document.getElementById('inkop-bild-input').click();">🖼️ Välj bild</button>
+          <button type="button" class="btn-secondary" style="flex:1; margin-top:0;" onclick="document.getElementById('inkop-bild-input').setAttribute('capture', 'environment'); document.getElementById('inkop-bild-input').click();">📷 Ta foto</button>
+        </div>
+        <input class="field-input" id="inkop-bild-input" type="file" accept="image/*" style="display:none;">
+        <div id="inkop-bild-vald" style="font-size:11px; color:var(--green-700); margin-top:4px;"></div>
+      </div>
       <div id="inkop-new-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin:8px 0;"></div>
       <button class="btn-primary" onclick="submitInkop()">Lägg till</button>
       <button class="btn-secondary" onclick="document.getElementById('inkop-new-overlay').remove()">Avbryt</button>
     </div>
   `;
   document.body.appendChild(overlay);
+  document.getElementById("inkop-bild-input").addEventListener("change", (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    inkopDraft.bildFile = file;
+    document.getElementById("inkop-bild-vald").textContent = `✔ ${file.name} vald`;
+  });
 }
 
 function openInkopMallPicker() {
@@ -4301,10 +4316,25 @@ async function submitInkop() {
   if (!inkopDraft.vad.trim()) { errorBox.textContent = "Skriv vad som ska beställas."; return; }
   const user = getCurrentUser();
   const vald = inkopDraft.valdMallId ? inkopMallarCache.find(m => m.id === inkopDraft.valdMallId) : null;
+
+  let bildUrl = null;
+  if (inkopDraft.bildFile) {
+    errorBox.textContent = "Bearbetar bild…";
+    let resized;
+    try { resized = await resizeImageForUpload(inkopDraft.bildFile); }
+    catch (e) { errorBox.textContent = "Kunde inte bearbeta bilden: " + e.message; return; }
+    errorBox.textContent = "Laddar upp bild…";
+    const path = `${user.id}/order-${Date.now()}.jpg`;
+    const { error: uploadError } = await sb.storage.from("inkop-mallar").upload(path, resized, { contentType: "image/jpeg" });
+    if (uploadError) { errorBox.textContent = "Kunde inte ladda upp bilden: " + uploadError.message; return; }
+    const { data: publicUrlData } = sb.storage.from("inkop-mallar").getPublicUrl(path);
+    bildUrl = publicUrlData.publicUrl;
+  }
+
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("inkop").insert({
     vad: inkopDraft.vad.trim(), antal: inkopDraft.antal || 1, lank: inkopDraft.lank || "", vnr: inkopDraft.vnr || "",
-    mall_id: inkopDraft.valdMallId || null,
+    mall_id: inkopDraft.valdMallId || null, bild_url: bildUrl,
     tilldelad_till: vald ? vald.tilldelad_till : null, anteckning: inkopDraft.anteckning || "", created_by: user.id,
   });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
