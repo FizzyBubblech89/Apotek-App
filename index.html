@@ -1915,12 +1915,13 @@ function orgCardHtml(u) {
   `;
 }
 
-function prestationBarHtml(kategori, antal, medaljNivaer) {
+function prestationBarHtml(kategori, antal, medaljer) {
   const meta = PRESTATION_KATEGORIER[kategori];
   const nastaNiva = PRESTATION_NIVAER.find(n => n > antal) || null;
   const foregNiva = [...PRESTATION_NIVAER].reverse().find(n => n <= antal) || 0;
   const spann = nastaNiva ? nastaNiva - foregNiva : 1;
   const framsteg = nastaNiva ? Math.min(100, Math.round(((antal - foregNiva) / spann) * 100)) : 100;
+  const sorterade = [...medaljer].sort((a, b) => b.niva - a.niva);
   return `
     <div style="margin-bottom:14px; text-align:left;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -1930,7 +1931,17 @@ function prestationBarHtml(kategori, antal, medaljNivaer) {
       <div style="height:8px; background:var(--line); border-radius:999px; overflow:hidden;">
         <div style="height:100%; width:${framsteg}%; background:linear-gradient(90deg, var(--green-600), var(--green-700)); border-radius:999px;"></div>
       </div>
-      ${medaljNivaer.length ? `<div style="font-size:10.5px; color:var(--muted); margin-top:3px;">🏅 ${medaljNivaer.length} medalj${medaljNivaer.length === 1 ? "" : "er"} (senast: nivå ${Math.max(...medaljNivaer)})</div>` : ""}
+      ${sorterade.length ? `
+        <div style="margin-top:6px;">
+          ${sorterade.map(m => `
+            <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); padding:2px 0;">
+              <span>🏅</span>
+              <span style="flex:1;">Nivå ${m.niva} uppnådd</span>
+              <span>${fmtSvShort(isoDate(new Date(m.earned_at)))}</span>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
     </div>
   `;
 }
@@ -1949,11 +1960,11 @@ async function openOrgPersonDetail(id) {
   const kategorier = Object.keys(PRESTATION_KATEGORIER);
   const [antalPerKategori, { data: allaMedaljer }] = await Promise.all([
     Promise.all(kategorier.map(k => raknaPrestation(u.id, k))),
-    sb.from("prestationer").select("kategori, niva").eq("user_id", u.id),
+    sb.from("prestationer").select("kategori, niva, earned_at").eq("user_id", u.id),
   ]);
   const prestationHtml = kategorier.map((k, i) => {
-    const medaljNivaer = (allaMedaljer || []).filter(m => m.kategori === k).map(m => m.niva);
-    return prestationBarHtml(k, antalPerKategori[i], medaljNivaer);
+    const medaljerForKategori = (allaMedaljer || []).filter(m => m.kategori === k);
+    return prestationBarHtml(k, antalPerKategori[i], medaljerForKategori);
   }).join("");
 
   const overlay = document.createElement("div");
