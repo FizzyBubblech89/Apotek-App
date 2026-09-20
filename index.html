@@ -7593,6 +7593,40 @@ async function openMote(id) {
   motenSection = "detail";
   document.getElementById("moten-title").textContent = aktivMote.titel;
   await loadMoteAktiviteter(id);
+  await loadOlostaFranForraMote();
+  renderMoteDetailView();
+}
+
+let olostaFranForraMoteCache = [];
+async function loadOlostaFranForraMote() {
+  olostaFranForraMoteCache = [];
+  if (!motenCache.length) await loadMoten();
+  const tidigare = motenCache
+    .filter(m => m.id !== aktivMote.id && (m.datum < aktivMote.datum || (m.datum === aktivMote.datum && m.created_at < aktivMote.created_at)))
+    .sort((a, b) => (a.datum < b.datum ? 1 : a.datum > b.datum ? -1 : (a.created_at < b.created_at ? 1 : -1)));
+  const foregaende = tidigare[0];
+  if (!foregaende) return;
+
+  const { data: gamlaAktiviteter } = await sb.from("mote_aktiviteter").select("*").eq("mote_id", foregaende.id);
+  const olosta = (gamlaAktiviteter || []).filter(a => a.status === "ej_klart" || a.status === "igang");
+  if (!olosta.length) return;
+
+  const redanKopierade = moteAktiviteterCache.map(a => a.kopierad_fran_id).filter(Boolean);
+  olostaFranForraMoteCache = olosta.filter(a => !redanKopierade.includes(a.id));
+}
+
+async function taMedOlostPunkt(id) {
+  const original = olostaFranForraMoteCache.find(a => a.id === id);
+  if (!original) return;
+  const user = getCurrentUser();
+  const { error } = await sb.from("mote_aktiviteter").insert({
+    mote_id: aktivMote.id, kategori: original.kategori, aktivitet: original.aktivitet,
+    ansvariga: original.ansvariga || [], deadline: original.deadline, status: original.status,
+    kopierad_fran_id: original.id, created_by: user.id,
+  });
+  if (error) { alert("Kunde inte ta med punkten: " + error.message); return; }
+  await loadMoteAktiviteter(aktivMote.id);
+  await loadOlostaFranForraMote();
   renderMoteDetailView();
 }
 
@@ -7611,6 +7645,23 @@ function renderMoteDetailView() {
       <button class="btn-secondary" onclick="exportMotePdf('${aktivMote.id}')">📄 PDF</button>
       ${isChef() ? `<button class="btn-secondary" style="color:#b3261e;" onclick="deleteMote('${aktivMote.id}')">✕</button>` : ""}
     </div>
+    ${olostaFranForraMoteCache.length ? `
+      <div style="background:#fff3d6; border:1px solid #f0c14b; border-radius:12px; padding:10px 12px; margin-top:14px;">
+        <div style="font-size:12px; font-weight:800; color:#b5590a; margin-bottom:8px;">📌 Olösta punkter från förra mötet</div>
+        ${olostaFranForraMoteCache.map(a => {
+          const kf = MOTE_KATEGORI_FARG[a.kategori] || { bg: "var(--line)", text: "var(--muted)" };
+          return `
+          <div style="display:flex; align-items:center; gap:8px; background:var(--white); border-radius:10px; padding:8px 10px; margin-bottom:6px;">
+            <div style="flex:1; min-width:0;">
+              <span class="org-badge" style="background:${kf.bg}; color:${kf.text}; margin-bottom:3px;">${a.kategori}</span>
+              <div style="font-size:12.5px; font-weight:700; margin-top:2px;">${a.aktivitet}</div>
+            </div>
+            <button class="btn-secondary" style="width:auto; padding:6px 10px; margin-top:0; font-size:11px; white-space:nowrap;" onclick="taMedOlostPunkt('${a.id}')">+ Ta med hit</button>
+          </div>
+        `;
+        }).join("")}
+      </div>
+    ` : ""}
     <div class="kassa-row-list" style="margin-top:16px;">
       ${moteAktiviteterCache.length ? moteAktiviteterCache.map(a => {
         const kf = MOTE_KATEGORI_FARG[a.kategori] || { bg: "var(--line)", text: "var(--muted)" };
