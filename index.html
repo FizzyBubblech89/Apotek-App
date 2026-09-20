@@ -10147,30 +10147,11 @@ function openSharedDayDetail(iso) {
       <div id="shared-day-comment-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
       <button class="btn-primary" onclick="submitSharedDayComment('${iso}')">Lägg till kommentar</button>
 
-      <div class="kassa-modal-label" style="margin-top:18px;">Uppgifter</div>
-      <div id="shared-day-tasks" style="margin:8px 0 12px;"></div>
-      ${isChef() ? `
-        <div class="field-group">
-          <label class="field-label">Ny uppgift</label>
-          <input class="field-input" id="shared-day-task-text" type="text" placeholder="T.ex. Räkna in leverans">
-        </div>
-        <div class="field-group">
-          <label class="field-label">Riktad till</label>
-          <select class="field-input" id="shared-day-task-target">
-            <option value="">Hela apoteket</option>
-            ${sharedAllProfiles.map(profile => `<option value="${profile.id}">${profile.name}</option>`).join("")}
-          </select>
-        </div>
-        <div id="shared-day-task-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
-        <button class="btn-secondary" onclick="submitSharedDayTask('${iso}')">Lägg till uppgift</button>
-      ` : ""}
-
       <button class="btn-secondary" onclick="document.getElementById('shared-day-overlay').remove()">Stäng</button>
     </div>
   `;
   document.body.appendChild(overlay);
   renderSharedDayComments(iso);
-  loadAndRenderSharedDayTasks(iso);
 }
 
 function renderSharedDayComments(iso) {
@@ -10262,7 +10243,7 @@ async function renderTodayWidget(user) {
     pendingOnskemal,
     pendingFriskanmalningar,
     unseenOnskemalSvar,
-    tasksRes,
+    ,
     ,
     lagerTilldeladeRes,
     snoozeRes,
@@ -10280,7 +10261,7 @@ async function renderTodayWidget(user) {
     isChefUser ? loadPendingOnskemal() : Promise.resolve([]),
     isChefUser ? loadPendingFriskanmalningar() : Promise.resolve([]),
     loadUnseenOnskemalSvar(),
-    sb.from("uppgifter").select("*").eq("datum", todayIso),
+    Promise.resolve({ data: [] }),
     loadTraningData(allProfilesForToday),
     sb.from("lager_checklista").select("*")
       .eq("ar", new Date().getFullYear()).eq("manad", new Date().getMonth() + 1)
@@ -10312,14 +10293,6 @@ async function renderTodayWidget(user) {
 
   const absentToday = allProfilesForToday.filter(p => absenceOn(p.id, todayIso));
   const todayPeople = absentToday.map(p => ({ profile: p, absent: true }));
-
-  const tasks = tasksRes.data;
-  const myTasks = (tasks || [])
-    .filter(t => isChefUser || t.target_user_id === null || t.target_user_id === user.id)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
-  const allProfiles = isChefUser && myTasks.some(t => t.target_user_id) ? allProfilesForToday : [];
-  const profileById = {};
-  allProfiles.forEach(p => { profileById[p.id] = p; });
 
   const yesterdayIso = isoDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
   const activeTraningar = traningarCache.filter(t => t.start_datum <= todayIso && t.slut_datum >= yesterdayIso);
@@ -10513,17 +10486,6 @@ async function renderTodayWidget(user) {
             `).join("")}
         </div>
       ` : ""}
-      ${myTasks.length ? myTasks.map(t => {
-        let targetLabel = "";
-        if (t.target_user_id === null) targetLabel = ` <span style="color:var(--muted); font-size:11px;">(hela apoteket)</span>`;
-        else if (isChefUser && t.target_user_id !== user.id) targetLabel = ` <span style="color:var(--muted); font-size:11px;">(${(profileById[t.target_user_id] || {}).name || "okänd person"})</span>`;
-        return `
-        <div class="today-task-row ${t.is_done ? "done" : ""}">
-          <input type="checkbox" ${t.is_done ? "checked" : ""} onchange="toggleTaskDone('${t.id}', this.checked, '${user.id}')">
-          <span>${t.text}${targetLabel}</span>
-        </div>
-      `;
-      }).join("") : ""}
     </div>
   `;
 }
@@ -10542,71 +10504,6 @@ function openAllNotificationsModal() {
   `;
   document.body.appendChild(overlay);
 }
-
-async function toggleTaskDone(id, checked, currentUserId) {
-  const { error } = await sb.from("uppgifter").update({ is_done: checked }).eq("id", id);
-  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
-  await renderTodayWidget(getCurrentUser());
-}
-
-let sharedDayTasksCache = [];
-async function loadAndRenderSharedDayTasks(iso) {
-  const { data, error } = await sb.from("uppgifter").select("*").eq("datum", iso).order("created_at", { ascending: true });
-  sharedDayTasksCache = error ? [] : data;
-  renderSharedDayTasksList(iso);
-}
-
-function renderSharedDayTasksList(iso) {
-  const wrap = document.getElementById("shared-day-tasks");
-  if (!wrap) return;
-  const profiles = sharedAllProfiles;
-  if (!sharedDayTasksCache.length) { wrap.innerHTML = `<div style="font-size:12.5px; color:var(--muted);">Inga uppgifter denna dag.</div>`; return; }
-  wrap.innerHTML = sharedDayTasksCache.map(t => {
-    const targetLabel = t.target_user_id === null
-      ? "Hela apoteket"
-      : (profiles.find(p => p.id === t.target_user_id) || {}).name || "Okänd person";
-    return `
-      <div class="today-task-row ${t.is_done ? "done" : ""}" style="border-top:1px solid var(--line);">
-        <input type="checkbox" ${t.is_done ? "checked" : ""} onchange="toggleSharedDayTask('${t.id}', this.checked, '${iso}')">
-        <span style="flex:1;">${t.text} <span style="color:var(--muted); font-size:11px;">· ${targetLabel}</span></span>
-        ${isChef() ? `<button class="kr-delete" onclick="deleteSharedDayTask('${t.id}', '${iso}')" aria-label="Ta bort">✕</button>` : ""}
-      </div>
-    `;
-  }).join("");
-}
-
-async function toggleSharedDayTask(id, checked, iso) {
-  const { error } = await sb.from("uppgifter").update({ is_done: checked }).eq("id", id);
-  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
-  await loadAndRenderSharedDayTasks(iso);
-}
-
-function deleteSharedDayTask(id, iso) {
-  confirmDelete(
-    "Ta bort uppgift?",
-    "Uppgiften tas bort permanent. Det går inte att ångra.",
-    async () => {
-      const { error } = await sb.from("uppgifter").delete().eq("id", id);
-      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
-      await loadAndRenderSharedDayTasks(iso);
-    }
-  );
-}
-
-async function submitSharedDayTask(iso) {
-  const text = document.getElementById("shared-day-task-text").value.trim();
-  const targetId = document.getElementById("shared-day-task-target").value || null;
-  const errorBox = document.getElementById("shared-day-task-error");
-  if (!text) { errorBox.textContent = "Skriv en uppgift innan du lägger till."; return; }
-  const user = getCurrentUser();
-  errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("uppgifter").insert({ datum: iso, target_user_id: targetId, text, created_by: user.id });
-  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
-  document.getElementById("shared-day-task-text").value = "";
-  errorBox.textContent = "";
-  await loadAndRenderSharedDayTasks(iso);
-}
-
 
 let kassaDraft = null;
 let kassaMonthOffset = 0;
