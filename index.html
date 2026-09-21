@@ -1988,7 +1988,10 @@ async function openOrgPersonDetail(id) {
         </div>
       ` : ""}
       <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--line);">
-        <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px; text-align:left;">Prestationer</div>
+        <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px; text-align:left;">Prestationer</div>
+        <div style="font-size:11px; color:var(--muted); text-align:left; line-height:1.5; margin-bottom:12px;">
+          En medalj 🏅 delas ut varje gång man når en ny nivå: <strong>1, 3, 5, 10, 20, 50, 100, 1000</strong>.
+        </div>
         ${prestationHtml}
       </div>
       <button class="btn-secondary" style="margin-top:8px;" onclick="document.getElementById('org-person-overlay').remove()">Stäng</button>
@@ -10363,7 +10366,7 @@ async function renderTodayWidget(user) {
     sb.from("kvalitetspunkt_last").select("punkt_id").eq("user_id", user.id),
     sb.from("pass_byte").select("id, user_id, status").eq("status", "oppen"),
     sb.from("pass_byte_sedd").select("byte_id").eq("user_id", user.id),
-    sb.from("prestationer").select("*").eq("user_id", user.id).gte("earned_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+    sb.from("prestationer").select("*").eq("user_id", user.id).eq("notis_dold", false).gte("earned_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
   ]);
 
   notisSnoozeMap = {};
@@ -10436,8 +10439,9 @@ async function renderTodayWidget(user) {
     const meta = PRESTATION_KATEGORIER[p.kategori];
     if (!meta) return;
     noticeBlocks.push(`
-      <div style="background:linear-gradient(150deg, #fff3e6, #ffe8d1); border:1px solid #f3b989; border-radius:12px; padding:8px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
+      <div id="prestation-notis-${p.id}" style="background:linear-gradient(150deg, #fff3e6, #ffe8d1); border:1px solid #f3b989; border-radius:12px; padding:8px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
         <span style="flex:1;">🏅 Grattis! Du nådde ${p.niva} ${meta.namn.toLowerCase()}</span>
+        <button onclick="dolPrestationNotis('${p.id}')" style="background:none; border:none; color:#b5590a; font-size:15px; font-weight:800; cursor:pointer; padding:0 2px; line-height:1;" aria-label="Dölj">✕</button>
       </div>
     `);
   });
@@ -10588,6 +10592,14 @@ async function renderTodayWidget(user) {
       ` : ""}
     </div>
   `;
+}
+
+async function dolPrestationNotis(id) {
+  const { error } = await sb.from("prestationer").update({ notis_dold: true }).eq("id", id);
+  if (error) { console.error(error); return; }
+  const overlay = document.getElementById("all-notifications-overlay");
+  if (overlay) overlay.remove();
+  await renderTodayWidget(getCurrentUser());
 }
 
 function openAllNotificationsModal() {
