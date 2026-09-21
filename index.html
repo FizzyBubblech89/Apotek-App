@@ -2273,7 +2273,6 @@ async function submitIdeaHandling(id) {
   }
   const { error } = await sb.from("ideer").update(patch).eq("id", id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
-  if (isHandled && idea && !idea.is_anonymous) await kollaOchTilldelaMedalj(idea.user_id, "ideer");
 
   const overlay = document.getElementById("idea-handle-overlay");
   if (overlay) overlay.remove();
@@ -3604,38 +3603,16 @@ async function raknaPrestation(userId, kategori) {
   return data.length;
 }
 
-async function kollaOchTilldelaMedalj(userId, kategori) {
-  const antal = await raknaPrestation(userId, kategori);
-  const { data: befintliga } = await sb.from("prestationer").select("niva").eq("user_id", userId).eq("kategori", kategori);
-  const befintligaNivaer = (befintliga || []).map(p => p.niva);
-  const nya = PRESTATION_NIVAER.filter(n => n <= antal && !befintligaNivaer.includes(n));
-  for (const niva of nya) {
-    await sb.from("prestationer").insert({ user_id: userId, kategori, niva });
-  }
-  return nya;
-}
 
 let saljtavlingVinnareKollade = null; // sessionsflagga — kolla bara en gång per session
 async function checkAvslutadeSaljtavlingar() {
   const idag = isoDate(new Date());
   if (saljtavlingVinnareKollade === idag) return;
   saljtavlingVinnareKollade = idag;
-
-  if (!traningarCache.length) return;
-  const avslutade = traningarCache.filter(t => t.slut_datum < idag);
-  if (!avslutade.length) return;
-
-  const { data: redanTilldelade } = await sb.from("saljtavling_vinster").select("traning_id");
-  const tilldeladeIds = (redanTilldelade || []).map(v => v.traning_id);
-
-  for (const t of avslutade) {
-    if (tilldeladeIds.includes(t.id)) continue;
-    const board = leaderboardFor(t.id);
-    if (!board.length || board[0].total <= 0) continue;
-    const vinnare = board[0];
-    const { error } = await sb.from("saljtavling_vinster").insert({ traning_id: t.id, user_id: vinnare.user_id });
-    if (!error) await kollaOchTilldelaMedalj(vinnare.user_id, "saljtavling");
-  }
+  // Belöningen sker i en SECURITY DEFINER-funktion i databasen, så det
+  // fungerar oavsett vem som råkar öppna Träning-sektionen — inte bara
+  // den faktiska vinnaren.
+  await sb.rpc("check_saljtavling_vinnare");
 }
 
 async function showTraning() {
@@ -6731,8 +6708,6 @@ async function submitPassbyteKommentar(byteId) {
   errorBox.textContent = "Skickar…";
   const { error } = await sb.from("pass_byte_kommentar").insert({ byte_id: byteId, kommentar, signum: user.signum, created_by: user.id });
   if (error) { errorBox.textContent = "Kunde inte skicka: " + error.message; return; }
-  const byte = passbyteCache.find(b => b.id === byteId);
-  if (byte && byte.user_id !== user.id) await kollaOchTilldelaMedalj(user.id, "passbyte_hjalp");
   document.getElementById("passbyte-kommentar-text").value = "";
   errorBox.textContent = "";
   await renderPassbyteKommentarList(byteId);
@@ -8248,7 +8223,6 @@ async function toggleUtbildningDeltagande(utbildningId, checked) {
   if (checked) {
     const { error } = await sb.from("utbildning_deltagare").insert({ utbildning_id: utbildningId, user_id: user.id, signum: user.signum });
     if (error) { alert("Kunde inte anmäla: " + error.message); return; }
-    await kollaOchTilldelaMedalj(user.id, "utbildning");
   } else {
     const { error } = await sb.from("utbildning_deltagare").delete().eq("utbildning_id", utbildningId).eq("user_id", user.id);
     if (error) { alert("Kunde inte avanmäla: " + error.message); return; }
@@ -9694,8 +9668,6 @@ async function saveReklamationDetail(id) {
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("reklamationer").update(patch).eq("id", id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
-  const r = reklamationCache.find(x => x.id === id);
-  if (patch.hanterad && r && r.created_by) await kollaOchTilldelaMedalj(r.created_by, "reklamation");
   const overlay = document.getElementById("reklamation-detail-overlay");
   if (overlay) overlay.remove();
   await loadReklamationer();
