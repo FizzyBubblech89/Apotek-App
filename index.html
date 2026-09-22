@@ -8349,18 +8349,37 @@ function nedladdaUtbildningIcs(id) {
   const u = utbildningarCache.find(x => x.id === id);
   if (!u) return;
 
-  const dtstart = u.datum.replace(/-/g, "");
-  // DTEND är exklusiv för heldagshändelser i iCalendar-formatet — en
-  // dag EFTER den faktiska sista dagen.
-  const slutObj = new Date((u.slutdatum || u.datum) + "T00:00:00");
-  slutObj.setDate(slutObj.getDate() + 1);
-  const dtend = isoDate(slutObj).replace(/-/g, "");
-
   const icsEscape = (s) => (s || "").replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/;/g, "\\;").replace(/\n/g, "\\n");
   const beskrivningDelar = [];
   if (u.fritext) beskrivningDelar.push(u.fritext);
   if (u.lank_eller_mail) beskrivningDelar.push(u.lank_eller_mail);
   const nu = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+
+  let dtstartRad, dtendRad;
+  if (u.starttid) {
+    // Tidsatt händelse — starttiden är känd, men ingen sluttid finns
+    // registrerad, så vi antar en rimlig standardlängd på 2 timmar på
+    // den sista dagen (eller enda dagen, om det inte är flerdagars).
+    const tid = u.starttid.slice(0, 5).replace(":", "");
+    const dtstart = `${u.datum.replace(/-/g, "")}T${tid}00`;
+    const sistaDagen = u.slutdatum || u.datum;
+    const slutObj = new Date(`${sistaDagen}T${u.starttid.slice(0, 5)}:00`);
+    slutObj.setHours(slutObj.getHours() + 2);
+    const slutDatumStr = isoDate(slutObj).replace(/-/g, "");
+    const slutTidStr = `${String(slutObj.getHours()).padStart(2, "0")}${String(slutObj.getMinutes()).padStart(2, "0")}00`;
+    dtstartRad = `DTSTART;TZID=Europe/Stockholm:${dtstart}`;
+    dtendRad = `DTEND;TZID=Europe/Stockholm:${slutDatumStr}T${slutTidStr}`;
+  } else {
+    // Ingen starttid angiven — heldagshändelse, precis som innan.
+    const dtstart = u.datum.replace(/-/g, "");
+    // DTEND är exklusiv för heldagshändelser i iCalendar-formatet — en
+    // dag EFTER den faktiska sista dagen.
+    const slutObj = new Date((u.slutdatum || u.datum) + "T00:00:00");
+    slutObj.setDate(slutObj.getDate() + 1);
+    const dtend = isoDate(slutObj).replace(/-/g, "");
+    dtstartRad = `DTSTART;VALUE=DATE:${dtstart}`;
+    dtendRad = `DTEND;VALUE=DATE:${dtend}`;
+  }
 
   const rader = [
     "BEGIN:VCALENDAR",
@@ -8370,8 +8389,8 @@ function nedladdaUtbildningIcs(id) {
     "BEGIN:VEVENT",
     `UID:utbildning-${u.id}@apotekhjartat`,
     `DTSTAMP:${nu}`,
-    `DTSTART;VALUE=DATE:${dtstart}`,
-    `DTEND;VALUE=DATE:${dtend}`,
+    dtstartRad,
+    dtendRad,
     `SUMMARY:${icsEscape(u.namn)}`,
   ];
   if (beskrivningDelar.length) rader.push(`DESCRIPTION:${icsEscape(beskrivningDelar.join("\n"))}`);
@@ -8418,7 +8437,7 @@ function renderUtbildningarView() {
         <div class="kassa-row" style="cursor:default; align-items:flex-start; flex-wrap:wrap;">
           <div style="flex:1; min-width:0;">
             <div style="font-weight:700; font-size:14px;">${u.namn}</div>
-            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">📅 ${(u.slutdatum && u.slutdatum !== u.datum) ? `${fmtSvFull(u.datum)} – ${fmtSvFull(u.slutdatum)}` : fmtSvFull(u.datum)}</div>
+            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">📅 ${(u.slutdatum && u.slutdatum !== u.datum) ? `${fmtSvFull(u.datum)} – ${fmtSvFull(u.slutdatum)}` : fmtSvFull(u.datum)}${u.starttid ? ` · ${u.starttid.slice(0, 5)}` : ""}</div>
             ${u.anmalan_deadline ? `<div style="font-size:11.5px; color:var(--muted); margin-top:2px;">Sista anmälningsdag: ${fmtSvShort(u.anmalan_deadline)}</div>` : ""}
             ${u.fritext ? `<div style="font-size:13px; margin-top:6px; white-space:pre-wrap;">${u.fritext}</div>` : ""}
             ${u.lank_eller_mail ? `<div style="margin-top:6px;">${lankArHttp ? `<a href="${u.lank_eller_mail}" target="_blank" rel="noopener" style="color:var(--green-700); font-weight:700; font-size:12.5px;">🔗 Till anmälan</a>` : lankArMail ? `<a href="mailto:${u.lank_eller_mail}" style="color:var(--green-700); font-weight:700; font-size:12.5px;">✉️ ${u.lank_eller_mail}</a>` : `<span style="font-size:12.5px;">${u.lank_eller_mail}</span>`}</div>` : ""}
@@ -8450,9 +8469,9 @@ async function toggleUtbildningDeltagande(utbildningId, checked) {
   renderUtbildningarView();
 }
 
-let nyUtbildningDraft = { namn: "", datum: isoDate(new Date()), slutdatum: null, lank_eller_mail: "", anmalan_deadline: isoDate(new Date()), fritext: "" };
+let nyUtbildningDraft = { namn: "", datum: isoDate(new Date()), slutdatum: null, starttid: "", lank_eller_mail: "", anmalan_deadline: isoDate(new Date()), fritext: "" };
 function openNyUtbildningModal() {
-  nyUtbildningDraft = { namn: "", datum: isoDate(new Date()), slutdatum: null, lank_eller_mail: "", anmalan_deadline: isoDate(new Date()), fritext: "" };
+  nyUtbildningDraft = { namn: "", datum: isoDate(new Date()), slutdatum: null, starttid: "", lank_eller_mail: "", anmalan_deadline: isoDate(new Date()), fritext: "" };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "ny-utbildning-overlay";
@@ -8486,6 +8505,10 @@ function renderNyUtbildningBody() {
           <button type="button" class="field-input kassa-date-btn" id="utbildning-slutdatum-btn" onclick="openUtbildningSlutdatumPicker()">${fmtSvFull(d.slutdatum)}</button>
         </div>
       ` : ""}
+      <div class="field-group">
+        <label class="field-label">Starttid (valfritt)</label>
+        <input class="field-input" type="time" value="${d.starttid}" oninput="nyUtbildningDraft.starttid = this.value">
+      </div>
       <div class="field-group">
         <label class="field-label">Länk eller mail till anmälan (valfritt)</label>
         <input class="field-input" id="utbildning-lank" type="text" placeholder="https://... eller namn@exempel.se" value="${d.lank_eller_mail}" oninput="nyUtbildningDraft.lank_eller_mail = this.value">
@@ -8543,7 +8566,7 @@ async function submitNyUtbildning() {
   const user = getCurrentUser();
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("utbildningar").insert({
-    namn: nyUtbildningDraft.namn.trim(), datum: nyUtbildningDraft.datum, slutdatum: nyUtbildningDraft.slutdatum,
+    namn: nyUtbildningDraft.namn.trim(), datum: nyUtbildningDraft.datum, slutdatum: nyUtbildningDraft.slutdatum, starttid: nyUtbildningDraft.starttid || null,
     lank_eller_mail: nyUtbildningDraft.lank_eller_mail.trim(), anmalan_deadline: nyUtbildningDraft.anmalan_deadline,
     fritext: nyUtbildningDraft.fritext.trim(), created_by: user.id,
   });
@@ -8559,7 +8582,7 @@ let editUtbildningDraft = null;
 function openEditUtbildningModal(id) {
   const u = utbildningarCache.find(x => x.id === id);
   if (!u) return;
-  editUtbildningDraft = { id, namn: u.namn, datum: u.datum, slutdatum: u.slutdatum || null, lank_eller_mail: u.lank_eller_mail || "", anmalan_deadline: u.anmalan_deadline || isoDate(new Date()), fritext: u.fritext || "" };
+  editUtbildningDraft = { id, namn: u.namn, datum: u.datum, slutdatum: u.slutdatum || null, starttid: (u.starttid || "").slice(0, 5), lank_eller_mail: u.lank_eller_mail || "", anmalan_deadline: u.anmalan_deadline || isoDate(new Date()), fritext: u.fritext || "" };
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "edit-utbildning-overlay";
@@ -8593,6 +8616,10 @@ function renderEditUtbildningBody() {
           <button type="button" class="field-input kassa-date-btn" id="edit-utbildning-slutdatum-btn" onclick="openEditUtbildningSlutdatumPicker()">${fmtSvFull(d.slutdatum)}</button>
         </div>
       ` : ""}
+      <div class="field-group">
+        <label class="field-label">Starttid (valfritt)</label>
+        <input class="field-input" type="time" value="${d.starttid}" oninput="editUtbildningDraft.starttid = this.value">
+      </div>
       <div class="field-group">
         <label class="field-label">Länk eller mail till anmälan (valfritt)</label>
         <input class="field-input" id="edit-utbildning-lank" type="text" value="${d.lank_eller_mail}" oninput="editUtbildningDraft.lank_eller_mail = this.value">
@@ -8649,7 +8676,7 @@ async function saveEditUtbildning() {
   if (!editUtbildningDraft.namn.trim()) { errorBox.textContent = "Skriv ett namn på utbildningen."; return; }
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("utbildningar").update({
-    namn: editUtbildningDraft.namn.trim(), datum: editUtbildningDraft.datum, slutdatum: editUtbildningDraft.slutdatum,
+    namn: editUtbildningDraft.namn.trim(), datum: editUtbildningDraft.datum, slutdatum: editUtbildningDraft.slutdatum, starttid: editUtbildningDraft.starttid || null,
     lank_eller_mail: editUtbildningDraft.lank_eller_mail.trim(), anmalan_deadline: editUtbildningDraft.anmalan_deadline,
     fritext: editUtbildningDraft.fritext.trim(),
   }).eq("id", editUtbildningDraft.id);
