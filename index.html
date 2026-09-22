@@ -4722,6 +4722,14 @@ function renderLagerHub() {
         <div class="nav-label">APL</div>
         <div class="nav-sub">Produkter & utgångsdatum</div>
       </div>
+
+      <div class="nav-card" onclick="showLageroptimering()">
+        <div class="nav-icon nav-icon-c2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 12L8 17L21 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="nav-label">Lageroptimering</div>
+        <div class="nav-sub">Förslag & justering</div>
+      </div>
     </div>
   `;
 }
@@ -5209,6 +5217,170 @@ function deleteApl(id) {
       if (error) { alert("Kunde inte ta bort: " + error.message); return; }
       await loadApl();
       renderAplView();
+    }
+  );
+}
+
+/* ---- Lageroptimering ---- */
+let lageroptimeringTab = "att-gora";
+let lageroptimeringCache = [];
+
+async function showLageroptimering() {
+  lagerSection = "optimering";
+  lageroptimeringTab = "att-gora";
+  await loadLageroptimering();
+  renderLageroptimeringView();
+}
+
+async function loadLageroptimering() {
+  const { data, error } = await sb.from("lager_optimering").select("*").order("created_at", { ascending: false });
+  lageroptimeringCache = error ? [] : data;
+}
+
+function setLageroptimeringTab(tab) {
+  lageroptimeringTab = tab;
+  renderLageroptimeringView();
+}
+
+function renderLageroptimeringView() {
+  const container = document.getElementById("lager-results");
+  const list = lageroptimeringCache.filter(o => lageroptimeringTab === "hanterade" ? o.bockad : !o.bockad);
+  container.innerHTML = `
+    <button class="btn-primary" onclick="openNyLageroptimeringModal()">+ Ny optimering</button>
+    <div class="view-toggle" style="margin-top:16px;">
+      <button id="lageroptimering-tab-att-gora" onclick="setLageroptimeringTab('att-gora')">Att optimera</button>
+      <button id="lageroptimering-tab-hanterade" onclick="setLageroptimeringTab('hanterade')">Hanterade optimeringar</button>
+    </div>
+    <div class="kassa-row-list" style="margin-top:16px;">
+      ${list.length ? list.map(o => `
+        <div class="kassa-row" style="align-items:flex-start;">
+          <input type="checkbox" ${o.bockad ? "checked" : ""} onchange="toggleLageroptimeringBockad('${o.id}', this.checked)" style="margin-top:2px;">
+          <div style="flex:1; min-width:0; margin-left:8px;">
+            <div style="font-weight:700; ${o.bockad ? "text-decoration:line-through; color:var(--muted);" : ""}">${o.namn}</div>
+            <div style="font-size:11px; color:var(--muted); margin-top:2px;">${o.vnr ? `VNR ${o.vnr} · ` : ""}Antal: ${o.antal}</div>
+            ${o.fritext ? `<div style="font-size:12px; margin-top:3px;">${o.fritext}</div>` : ""}
+            <div style="font-size:10.5px; color:var(--muted); margin-top:3px;">
+              Skapad av ${o.skapad_signum || "okänd"}
+              ${o.bockad ? ` · Bockad av ${o.bockad_signum || "okänd"}${o.bockad_datum ? ` (${fmtSvShort(isoDate(new Date(o.bockad_datum)))})` : ""}` : ""}
+            </div>
+          </div>
+          <button class="kr-edit" onclick="openEditLageroptimeringModal('${o.id}')" aria-label="Redigera">✎</button>
+          <button class="kr-delete" onclick="deleteLageroptimering('${o.id}')" aria-label="Ta bort">✕</button>
+        </div>
+      `).join("") : `<div class="empty-state">${lageroptimeringTab === "hanterade" ? "Inga hanterade optimeringar ännu." : "Inga optimeringar att göra just nu."}</div>`}
+    </div>
+  `;
+  document.getElementById(`lageroptimering-tab-${lageroptimeringTab}`).classList.add("active");
+}
+
+async function toggleLageroptimeringBockad(id, checked) {
+  const user = getCurrentUser();
+  const patch = checked
+    ? { bockad: true, bockad_av: user.id, bockad_signum: user.signum, bockad_datum: new Date().toISOString() }
+    : { bockad: false, bockad_av: null, bockad_signum: null, bockad_datum: null };
+  const { error } = await sb.from("lager_optimering").update(patch).eq("id", id);
+  if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
+  await loadLageroptimering();
+  renderLageroptimeringView();
+}
+
+let lageroptimeringDraft = null;
+function openNyLageroptimeringModal() {
+  lageroptimeringDraft = { namn: "", vnr: "", antal: 1, fritext: "", isEdit: false };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "lageroptimering-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Ny optimering</div><div id="lageroptimering-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderLageroptimeringBody();
+}
+
+function renderLageroptimeringBody() {
+  const d = lageroptimeringDraft;
+  const wrap = document.getElementById("lageroptimering-body");
+  wrap.innerHTML = `
+      <div class="field-group">
+        <label class="field-label">Namn</label>
+        <input class="field-input" id="lageroptimering-namn" type="text" placeholder="T.ex. Flytta till annan hylla" value="${d.namn}" oninput="lageroptimeringDraft.namn = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">VNR (valfritt)</label>
+        <input class="field-input" type="text" inputmode="numeric" value="${d.vnr}" oninput="lageroptimeringDraft.vnr = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Antal</label>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <button type="button" onclick="lageroptimeringDraft.antal = Math.max(0, lageroptimeringDraft.antal - 1); renderLageroptimeringBody();" style="width:40px; height:40px; border-radius:10px; border:1px solid var(--line); background:var(--white); font-size:18px; font-weight:700; cursor:pointer;">−</button>
+          <div style="flex:1; text-align:center; font-size:18px; font-weight:700;">${d.antal}</div>
+          <button type="button" onclick="lageroptimeringDraft.antal = lageroptimeringDraft.antal + 1; renderLageroptimeringBody();" style="width:40px; height:40px; border-radius:10px; border:1px solid var(--line); background:var(--white); font-size:18px; font-weight:700; cursor:pointer;">+</button>
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Fritext (valfritt)</label>
+        <textarea class="field-input" id="lageroptimering-fritext" style="min-height:60px;" oninput="lageroptimeringDraft.fritext = this.value">${d.fritext}</textarea>
+      </div>
+      <div id="lageroptimering-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="${d.isEdit ? "saveEditLageroptimering()" : "submitNyLageroptimering()"}">${d.isEdit ? "Spara ändringar" : "Spara"}</button>
+      <button class="btn-secondary" onclick="document.getElementById('lageroptimering-overlay').remove()">Avbryt</button>
+  `;
+}
+
+async function submitNyLageroptimering() {
+  const d = lageroptimeringDraft;
+  const errorBox = document.getElementById("lageroptimering-error");
+  if (!d.namn.trim()) { errorBox.textContent = "Skriv ett namn."; return; }
+  const user = getCurrentUser();
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("lager_optimering").insert({
+    namn: d.namn.trim(), vnr: d.vnr.trim(), antal: d.antal, fritext: d.fritext.trim(),
+    skapad_av: user.id, skapad_signum: user.signum,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("lageroptimering-overlay");
+  if (overlay) overlay.remove();
+  await loadLageroptimering();
+  renderLageroptimeringView();
+}
+
+function openEditLageroptimeringModal(id) {
+  const o = lageroptimeringCache.find(x => x.id === id);
+  if (!o) return;
+  lageroptimeringDraft = { id, namn: o.namn, vnr: o.vnr || "", antal: o.antal, fritext: o.fritext || "", isEdit: true };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "lageroptimering-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Redigera optimering</div><div id="lageroptimering-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderLageroptimeringBody();
+}
+
+async function saveEditLageroptimering() {
+  const d = lageroptimeringDraft;
+  const errorBox = document.getElementById("lageroptimering-error");
+  if (!d.namn.trim()) { errorBox.textContent = "Skriv ett namn."; return; }
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("lager_optimering").update({
+    namn: d.namn.trim(), vnr: d.vnr.trim(), antal: d.antal, fritext: d.fritext.trim(),
+  }).eq("id", d.id);
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  const overlay = document.getElementById("lageroptimering-overlay");
+  if (overlay) overlay.remove();
+  await loadLageroptimering();
+  renderLageroptimeringView();
+}
+
+function deleteLageroptimering(id) {
+  const o = lageroptimeringCache.find(x => x.id === id);
+  confirmDelete(
+    "Ta bort optimering?",
+    `<strong>${o ? o.namn : "Optimeringen"}</strong> tas bort permanent. Det går inte att ångra.`,
+    async () => {
+      const { error } = await sb.from("lager_optimering").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      await loadLageroptimering();
+      renderLageroptimeringView();
     }
   );
 }
