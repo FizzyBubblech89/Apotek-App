@@ -5302,7 +5302,7 @@ function renderLageroptimeringBody() {
   wrap.innerHTML = `
       <div class="field-group">
         <label class="field-label">Namn</label>
-        <input class="field-input" id="lageroptimering-namn" type="text" placeholder="T.ex. Flytta till annan hylla" value="${d.namn}" oninput="lageroptimeringDraft.namn = this.value">
+        <input class="field-input" id="lageroptimering-namn" type="text" placeholder="T.ex. Ipren 400mg" value="${d.namn}" oninput="lageroptimeringDraft.namn = this.value">
       </div>
       <div class="field-group">
         <label class="field-label">VNR (valfritt)</label>
@@ -5311,7 +5311,7 @@ function renderLageroptimeringBody() {
       <div class="field-group">
         <label class="field-label">Antal</label>
         <div style="display:flex; align-items:center; gap:10px;">
-          <button type="button" onclick="lageroptimeringDraft.antal = Math.max(0, lageroptimeringDraft.antal - 1); renderLageroptimeringBody();" style="width:40px; height:40px; border-radius:10px; border:1px solid var(--line); background:var(--white); font-size:18px; font-weight:700; cursor:pointer;">−</button>
+          <button type="button" onclick="lageroptimeringDraft.antal = lageroptimeringDraft.antal - 1; renderLageroptimeringBody();" style="width:40px; height:40px; border-radius:10px; border:1px solid var(--line); background:var(--white); font-size:18px; font-weight:700; cursor:pointer;">−</button>
           <div style="flex:1; text-align:center; font-size:18px; font-weight:700;">${d.antal}</div>
           <button type="button" onclick="lageroptimeringDraft.antal = lageroptimeringDraft.antal + 1; renderLageroptimeringBody();" style="width:40px; height:40px; border-radius:10px; border:1px solid var(--line); background:var(--white); font-size:18px; font-weight:700; cursor:pointer;">+</button>
         </div>
@@ -8345,6 +8345,49 @@ function setUtbildningarTab(tab) {
   renderUtbildningarView();
 }
 
+function nedladdaUtbildningIcs(id) {
+  const u = utbildningarCache.find(x => x.id === id);
+  if (!u) return;
+
+  const dtstart = u.datum.replace(/-/g, "");
+  // DTEND är exklusiv för heldagshändelser i iCalendar-formatet — en
+  // dag EFTER den faktiska sista dagen.
+  const slutObj = new Date((u.slutdatum || u.datum) + "T00:00:00");
+  slutObj.setDate(slutObj.getDate() + 1);
+  const dtend = isoDate(slutObj).replace(/-/g, "");
+
+  const icsEscape = (s) => (s || "").replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/;/g, "\\;").replace(/\n/g, "\\n");
+  const beskrivningDelar = [];
+  if (u.fritext) beskrivningDelar.push(u.fritext);
+  if (u.lank_eller_mail) beskrivningDelar.push(u.lank_eller_mail);
+  const nu = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+
+  const rader = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Apotek Hjartat Vallingbygangen//Utbildningar//SV",
+    "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT",
+    `UID:utbildning-${u.id}@apotekhjartat`,
+    `DTSTAMP:${nu}`,
+    `DTSTART;VALUE=DATE:${dtstart}`,
+    `DTEND;VALUE=DATE:${dtend}`,
+    `SUMMARY:${icsEscape(u.namn)}`,
+  ];
+  if (beskrivningDelar.length) rader.push(`DESCRIPTION:${icsEscape(beskrivningDelar.join("\n"))}`);
+  rader.push("END:VEVENT", "END:VCALENDAR");
+
+  const blob = new Blob([rader.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(u.namn || "utbildning").replace(/[^a-zA-Z0-9åäöÅÄÖ ]+/g, "").trim() || "utbildning"}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function renderUtbildningarView() {
   const container = document.getElementById("utbildningar-results");
   const todayIso = isoDate(new Date());
@@ -8384,6 +8427,7 @@ function renderUtbildningarView() {
               <span class="kassa-check-name" style="font-weight:400;">Jag deltar</span>
             </label>
             <div style="font-size:11px; color:var(--muted); margin-top:4px;">${deltagare.length} anmäld${deltagare.length === 1 ? "" : "a"}${deltagareNamn.length ? `: ${deltagareNamn.join(", ")}` : ""}</div>
+            ${utbildningarTab === "aktuella" ? `<button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:8px; font-size:11.5px;" onclick="nedladdaUtbildningIcs('${u.id}')">📅 Lägg till i kalender</button>` : ""}
           </div>
           <button class="kr-edit" onclick="openEditUtbildningModal('${u.id}')" aria-label="Redigera">✎</button>
           ${isChef() ? `<button class="kr-delete" onclick="deleteUtbildning('${u.id}')" aria-label="Ta bort">✕</button>` : ""}
