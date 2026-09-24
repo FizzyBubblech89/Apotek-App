@@ -4507,7 +4507,7 @@ function traningCardHtml(t, isHistorik) {
   const user = getCurrentUser();
   const jagArDeltagare = board.some(p => p.user_id === user.id);
   const periodLabel = `${fmtSvShort(t.start_datum)} – ${fmtSvShort(t.slut_datum)}`;
-  const visadeRader = isHistorik ? board : board.slice(0, 5);
+  const visadeRader = board;
 
   return `
     <div class="org-card" style="width:100%; align-items:stretch; text-align:left; margin-bottom:16px; padding:16px;">
@@ -11351,6 +11351,7 @@ async function renderTodayWidget(user) {
     passbyteRes,
     passbyteSeddMinaRes,
     nyaPrestationerRes,
+    kommandeRubrikerRes,
   ] = await Promise.all([
     loadFranvaroCache(),
     sb.from("tilldelade_uppgifter").select("*").or(`target_user_id.eq.${user.id},target_user_id.is.null`).eq("is_done", false).eq("aterkommande", false).order("deadline", { ascending: true }),
@@ -11372,6 +11373,7 @@ async function renderTodayWidget(user) {
     sb.from("pass_byte").select("id, user_id, status").eq("status", "oppen"),
     sb.from("pass_byte_sedd").select("byte_id").eq("user_id", user.id),
     sb.from("prestationer").select("*").eq("user_id", user.id).eq("notis_dold", false).gte("earned_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+    sb.from("schema_kommentarer").select("*").eq("typ", "rubrik").gte("datum", todayIso).lte("datum", isoDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))).order("datum", { ascending: true }),
   ]);
 
   notisSnoozeMap = {};
@@ -11450,6 +11452,29 @@ async function renderTodayWidget(user) {
       </div>
     `);
   });
+
+  const kommandeRubriker = kommandeRubrikerRes.data || [];
+  if (kommandeRubriker.length) {
+    // Slås ihop med (inte skriver över) den befintliga cachen, så att
+    // openHeadingDetailModal fortfarande hittar rätt rad oavsett varifrån
+    // den öppnas.
+    kommandeRubriker.forEach(r => { if (!dayHeadingsCache.some(x => x.id === r.id)) dayHeadingsCache.push(r); });
+    const imorgonIso = isoDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
+    noticeBlocks.push(`
+      <div style="background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:8px 10px; margin-bottom:4px;">
+        <div style="font-size:11px; font-weight:800; color:var(--green-700); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:6px;">📌 Kommande händelser</div>
+        ${kommandeRubriker.map(r => {
+          const dagLabel = r.datum === todayIso ? "Idag" : r.datum === imorgonIso ? "Imorgon" : fmtSvShort(r.datum);
+          return `
+            <div onclick="openHeadingDetailModal('${r.id}', '${r.datum}')" style="cursor:pointer; display:flex; gap:8px; align-items:baseline; padding:3px 0;">
+              <span style="font-size:11px; font-weight:800; color:var(--green-700); white-space:nowrap;">${dagLabel}</span>
+              <span style="font-size:12px; font-weight:700; flex:1;">${r.text}</span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `);
+  }
 
   const inkopTilldelade = inkopTilldeladeRes.data || [];
   inkopTilldelade.forEach(i => {
