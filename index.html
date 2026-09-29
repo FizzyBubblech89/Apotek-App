@@ -1309,12 +1309,13 @@ async function renderHomeForUser(user) {
   }
 
   const isChef = user.role === "chef";
-  const [ideaBadgeCount, kassaFlaggedRes, tasksCountRes, unseenUtbildningCount, pagaendeReklamRes] = await Promise.all([
+  const [ideaBadgeCount, kassaFlaggedRes, tasksCountRes, unseenUtbildningCount, pagaendeReklamRes, klaraReklamRes] = await Promise.all([
     isChef ? fetchUnhandledIdeaCount() : fetchUnseenFeedbackCount(),
     isChef ? sb.from("kassaredovisningar").select("id, kassadifferens").eq("granskad", false) : Promise.resolve({ data: [] }),
     !isChef ? sb.from("tilldelade_uppgifter").select("id").eq("target_user_id", user.id).eq("is_done", false) : Promise.resolve({ data: [] }),
     fetchUnseenUtbildningCount(),
-    sb.from("reklamationer").select("id, sedd_av_va").eq("hanterad", false),
+    sb.from("reklamationer").select("id, sedd_av_va, paborjad").eq("hanterad", false),
+    sb.from("reklamationer").select("id").eq("created_by", user.id).eq("hanterad", true).eq("sedd_av_skapare", false),
   ]);
 
   const ideasCardWrap = document.getElementById("nav-card-ideas");
@@ -1379,15 +1380,21 @@ async function renderHomeForUser(user) {
 
   const reklamationCardWrap = document.getElementById("nav-card-reklamation");
   if (reklamationCardWrap) {
+    const reklamOpen = pagaendeReklamRes.data || [];
+    const reklamNyaCount = reklamOpen.filter(r => !r.paborjad).length;
+    const reklamPagCount = reklamOpen.length - reklamNyaCount;
+    const reklamKlaraCount = (klaraReklamRes.data || []).length;
+    const reklamSubParts = [];
+    if (reklamNyaCount > 0) reklamSubParts.push(`${reklamNyaCount} ny${reklamNyaCount === 1 ? "" : "a"}`);
+    if (reklamPagCount > 0) reklamSubParts.push(`${reklamPagCount} pågående`);
+    if (reklamKlaraCount > 0) reklamSubParts.push(`${reklamKlaraCount} klar${reklamKlaraCount === 1 ? "" : "a"} (din)`);
     reklamationCardWrap.innerHTML = `
-      <div class="nav-card ${(pagaendeReklamRes.data || []).length > 0 ? "nav-card-alert" : ""}" onclick="showReklamation()">
+      <div class="nav-card ${(reklamNyaCount > 0 || reklamKlaraCount > 0) ? "nav-card-alert" : ""}" onclick="showReklamation()">
         <div class="nav-icon nav-icon-c4">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 3H15L21 9V19C21 20.1 20.1 21 19 21H5C3.9 21 3 20.1 3 19V5C3 3.9 3.9 3 5 3H9Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 3V9H15" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 13H16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M8 17H13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </div>
         <div class="nav-label">Reklamation</div>
-        <div class="nav-sub">
-          ${(pagaendeReklamRes.data || []).length > 0 ? `${pagaendeReklamRes.data.length} pågående${(() => { const nya = (pagaendeReklamRes.data || []).filter(r => !r.sedd_av_va).length; return nya > 0 ? ` · ${nya} ny${nya === 1 ? "" : "a"}` : ""; })()}` : "Registrera & hantera"}
-        </div>
+        <div class="nav-sub">${reklamSubParts.length ? reklamSubParts.join(" · ") : "Registrera & hantera"}</div>
       </div>
     `;
   }
@@ -10324,7 +10331,7 @@ function deleteLosenord(id) {
 async function showReklamation() {
   document.getElementById("view-home").style.display = "none";
   document.getElementById("view-reklamation").style.display = "block";
-  reklamationTab = "pagaende";
+  reklamationTab = "nya";
   reklamationDraft = emptyReklamationDraft();
   await loadReklamationer();
   renderReklamationView();
@@ -10342,12 +10349,19 @@ function setReklamationTab(tab) {
 
 function renderReklamationView() {
   const container = document.getElementById("reklamation-results");
-  const list = reklamationCache.filter(r => reklamationTab === "avslutade" ? r.hanterad : !r.hanterad);
+  const user = getCurrentUser();
+  const list = reklamationCache.filter(r => {
+    if (reklamationTab === "avslutade") return r.hanterad;
+    if (reklamationTab === "nya") return !r.hanterad && !r.paborjad;
+    return !r.hanterad && r.paborjad;
+  });
+  const nyaCount = reklamationCache.filter(r => !r.hanterad && !r.paborjad).length;
 
   container.innerHTML = `
     <button class="btn-primary" onclick="openNewReklamationModal()">+ Ny reklamation</button>
 
     <div class="view-toggle" style="margin-top:20px;">
+      <button id="reklamation-tab-nya" onclick="setReklamationTab('nya')">Nya${nyaCount > 0 ? ` (${nyaCount})` : ""}</button>
       <button id="reklamation-tab-pagaende" onclick="setReklamationTab('pagaende')">Pågående</button>
       <button id="reklamation-tab-avslutade" onclick="setReklamationTab('avslutade')">Avslutade</button>
     </div>
@@ -10355,6 +10369,7 @@ function renderReklamationView() {
   `;
   document.getElementById(`reklamation-tab-${reklamationTab}`).classList.add("active");
 
+  const emptyLabel = reklamationTab === "avslutade" ? "avslutade" : reklamationTab === "nya" ? "nya" : "pågående";
   const listWrap = document.getElementById("reklamation-list");
   listWrap.innerHTML = list.length
     ? `<div class="kassa-row-list">${list.map(r => `
@@ -10363,12 +10378,13 @@ function renderReklamationView() {
             <div style="font-weight:700;">${r.varunamn}</div>
             <div style="font-size:11px; color:var(--muted); margin-top:2px;">${fmtSvShort(r.datum)} · ${r.medarbetare_signum}${r.arende_nummer ? ` · ${r.arende_nummer}` : ""}</div>
           </div>
-          ${r.hanterad ? `<span class="org-badge" style="background:var(--green-100); color:var(--green-700);">Hanterad</span>` : `<span class="org-badge" style="background:#fde3c8; color:#b5590a;">Pågående</span>`}
-          ${!r.hanterad && !r.sedd_av_va ? `<span class="org-badge" style="background:#fdecec; color:#b3261e; font-weight:800;">Ny</span>` : ""}
+          ${r.hanterad ? `<span class="org-badge" style="background:var(--green-100); color:var(--green-700);">Hanterad</span>` : r.paborjad ? `<span class="org-badge" style="background:#fde3c8; color:#b5590a;">Pågående</span>` : `<span class="org-badge" style="background:#fdecec; color:#b3261e;">Ny</span>`}
+          ${reklamationTab === "nya" && !r.sedd_av_va ? `<span class="org-badge" style="background:#fdecec; color:#b3261e; font-weight:800;">Ej sedd</span>` : ""}
+          ${r.hanterad && !r.sedd_av_skapare && user && r.created_by === user.id ? `<span class="org-badge" style="background:var(--green-100); color:var(--green-700); font-weight:800;">Klar</span>` : ""}
           ${canDeleteReklamation() ? `<button class="kr-delete" onclick="event.stopPropagation(); deleteReklamation('${r.id}')" aria-label="Ta bort">✕</button>` : ""}
         </div>
       `).join("")}</div>`
-    : `<div class="empty-state">Inga ${reklamationTab === "avslutade" ? "avslutade" : "pågående"} reklamationer.</div>`;
+    : `<div class="empty-state">Inga ${emptyLabel} reklamationer.</div>`;
 }
 
 function deleteReklamation(id) {
@@ -10561,6 +10577,10 @@ async function openReklamationDetail(id) {
     const { error } = await sb.from("reklamationer").update({ sedd_av_va: true, sedd_av_va_datum: new Date().toISOString() }).eq("id", id);
     if (!error) { r.sedd_av_va = true; r.sedd_av_va_datum = new Date().toISOString(); }
   }
+  if (r.hanterad && !r.sedd_av_skapare && user && r.created_by === user.id) {
+    const { error } = await sb.from("reklamationer").update({ sedd_av_skapare: true }).eq("id", id);
+    if (!error) { r.sedd_av_skapare = true; }
+  }
 
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
@@ -10569,6 +10589,7 @@ async function openReklamationDetail(id) {
   overlay.innerHTML = `
     <div class="kassa-modal-card">
       <div class="kassa-modal-title">${r.varunamn}</div>
+      ${r.hanterad && user && r.created_by === user.id ? `<div style="background:var(--green-050); color:var(--green-700); font-size:12px; font-weight:700; padding:8px 12px; border-radius:10px; margin-bottom:14px;">✔ Din reklamation har hanterats.</div>` : ""}
       ${!editable ? `<div style="background:#fff3e6; color:#b5590a; font-size:12px; font-weight:700; padding:8px 12px; border-radius:10px; margin-bottom:14px;">🔒 Den här reklamationen är hanterad. Endast VA eller chef kan redigera den vidare.</div>` : ""}
 
       <button class="btn-secondary" onclick="exportReklamationPdf('${id}')" style="margin-bottom:16px;">📄 Exportera PDF</button>
@@ -10639,6 +10660,8 @@ function reklamationDetailField(label, id, value, editable, type) {
 async function saveReklamationDetail(id) {
   const errorBox = document.getElementById("reklamation-detail-error");
   const val = (elId) => { const el = document.getElementById(elId); return el ? el.value : undefined; };
+  const user = getCurrentUser();
+  const existing = reklamationCache.find(x => x.id === id);
 
   let bildUrl;
   const bildInput = document.getElementById("rekl-bild-input");
@@ -10667,9 +10690,15 @@ async function saveReklamationDetail(id) {
     vad_hander_vidare: val("rekl-vad-hander"), vara_inskickad: val("rekl-inskickad"),
     vara_destruerad: val("rekl-destruerad"), aterkoppling_kund: val("rekl-aterkoppling"),
     hanterad: document.getElementById("rekl-hanterad").checked,
+    paborjad: true,
     updated_at: new Date().toISOString(),
   };
   if (bildUrl) patch.bild_url = bildUrl;
+  // Går den från ej hanterad till hanterad nu, ska den som skapade
+  // reklamationen få en notis (om det inte är hen själv som avslutar den).
+  if (patch.hanterad && existing && !existing.hanterad && existing.created_by !== (user && user.id)) {
+    patch.sedd_av_skapare = false;
+  }
   // Ta bara med fält som faktiskt var redigerbara (fanns i formuläret)
   Object.keys(patch).forEach(k => { if (patch[k] === undefined) delete patch[k]; });
 
