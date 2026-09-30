@@ -24,8 +24,8 @@ self.addEventListener("push", (event) => {
   const title = data.title || "Apoteks App";
   const options = {
     body: data.body || "",
-    icon: data.icon || undefined, // sätt en URL till en ikon här om ni vill ha en egen
-    badge: data.badge || undefined,
+    icon: data.icon || "icon-192.png",
+    badge: data.badge || "icon-192.png",
     tag: data.tag || undefined,
     data: { url: data.url || "./" },
   };
