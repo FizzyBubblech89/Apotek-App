@@ -8299,6 +8299,60 @@ async function loadKundtjanst() {
   ktCache = error ? [] : data;
 }
 
+function ktChartHtml(rader) {
+  // rader: 12 månader i tidsordning (äldst först), post = registrerad rad eller null.
+  if (!rader.some(r => r.post)) return `<div class="empty-state" style="margin-bottom:14px;">Inga resultat registrerade ännu.</div>`;
+  const B = 340, padL = 26, padR = 10, kol = (B - padL - padR) / rader.length;
+  const antalTop = 22, antalH = 74;            // panel 1: staplar
+  const placTop = antalTop + antalH + 34, placH = 64; // panel 2: linje
+  const H = placTop + placH + 28;
+  const cx = i => padL + i * kol + kol / 2;
+
+  const maxAntal = Math.max(1, ...rader.map(r => r.post ? r.post.antal : 0));
+  const staplar = rader.map((r, i) => {
+    if (!r.post) return "";
+    const h = Math.max(2, (r.post.antal / maxAntal) * antalH);
+    const w = kol * 0.62, x = cx(i) - w / 2, y = antalTop + antalH - h;
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="#4caf82"></rect>
+      <text x="${cx(i)}" y="${y - 4}" font-size="9" text-anchor="middle" fill="var(--ink)" font-weight="700">${r.post.antal}</text>`;
+  }).join("");
+
+  const plac = rader.map(r => (r.post && r.post.placering) ? r.post.placering : null);
+  const valda = plac.filter(v => v !== null);
+  let linjeSvg = `<text x="${B / 2}" y="${placTop + placH / 2}" font-size="9" text-anchor="middle" fill="var(--muted)">Ingen placering registrerad</text>`;
+  if (valda.length) {
+    const lo = Math.min(...valda), hi = Math.max(...valda);
+    const span = Math.max(hi - lo, 1);
+    // Bäst placering (lägst tal) högst upp.
+    const yFor = v => valda.length && hi === lo ? placTop + placH / 2 : placTop + 10 + ((v - lo) / span) * (placH - 20);
+    let path = "", open = false;
+    plac.forEach((v, i) => {
+      if (v === null) { open = false; return; }
+      path += `${open ? "L" : "M"}${cx(i)},${yFor(v)} `; open = true;
+    });
+    linjeSvg = `<path d="${path}" fill="none" stroke="#0284c7" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"></path>` +
+      plac.map((v, i) => v === null ? "" : `
+        <circle cx="${cx(i)}" cy="${yFor(v)}" r="3.2" fill="#0284c7"></circle>
+        <text x="${cx(i)}" y="${yFor(v) - 7}" font-size="9" text-anchor="middle" fill="var(--ink)" font-weight="700">#${v}</text>`).join("");
+  }
+
+  const manadsetiketter = rader.map((r, i) =>
+    `<text x="${cx(i)}" y="${H - 8}" font-size="7.5" text-anchor="middle" fill="var(--muted)">${MYS_MANADSNAMN[r.manad].slice(0, 3)}</text>`).join("");
+
+  return `
+    <svg viewBox="0 0 ${B} ${H}" style="width:100%; height:auto; background:var(--white); border:1px solid var(--line); border-radius:14px; margin-bottom:6px;">
+      <text x="${padL}" y="13" font-size="9.5" font-weight="800" fill="var(--ink)">Antal</text>
+      <line x1="${padL}" y1="${antalTop + antalH}" x2="${B - padR}" y2="${antalTop + antalH}" stroke="var(--line)" stroke-width="1"></line>
+      ${staplar}
+      <text x="${padL}" y="${placTop - 10}" font-size="9.5" font-weight="800" fill="var(--ink)">Placering i landet <tspan font-weight="400" fill="var(--muted)" font-size="8">(högre upp = bättre)</tspan></text>
+      <line x1="${padL}" y1="${placTop + placH}" x2="${B - padR}" y2="${placTop + placH}" stroke="var(--line)" stroke-width="1"></line>
+      ${linjeSvg}
+      ${manadsetiketter}
+    </svg>
+    <div style="font-size:10px; color:var(--muted); text-align:center; margin-bottom:14px;">Senaste 12 månaderna</div>
+  `;
+}
+
 function renderKundtjanstView() {
   const container = document.getElementById("kundmote-results");
   const cfg = KUNDTJANSTER[ktTyp];
@@ -8312,6 +8366,7 @@ function renderKundtjanstView() {
   const summa = rader.reduce((s, r) => s + (r.post ? r.post.antal : 0), 0);
   container.innerHTML = `
     <div style="font-weight:800; font-size:15px; margin-bottom:10px;">${cfg.titel}</div>
+    ${ktChartHtml([...rader].reverse())}
     <button class="btn-primary" onclick="openKundtjanstModal(null)">Registrera nytt resultat</button>
     <div class="kassa-row-list" style="margin-top:16px;">
       <div class="kassa-row" style="cursor:default; font-size:11px; font-weight:800; color:var(--muted);">
