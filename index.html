@@ -4990,11 +4990,18 @@ async function ensureAterkommandeUppgifterFinns() {
       malDatum.setDate(malDatum.getDate() + (mall.veckodag - 1));
       const malDatumIso = isoDate(malDatum);
       const { data: befintlig } = await sb.from("tilldelade_uppgifter").select("id").eq("mall_id", mall.id).eq("deadline", malDatumIso);
-      if (befintlig && befintlig.length) continue; // redan skapad denna vecka
-      await sb.from("tilldelade_uppgifter").insert({
+      if (befintlig && befintlig.length) continue; // redan skapad denna vecka (snabbkoll, se även DB-spärr nedan)
+      // OBS: två flikar/personer kan hinna passera kollen ovan samtidigt
+      // (race condition). Databasen har ett unikt index på (mall_id,
+      // deadline) som sista spärr — ignorera tyst om den träffar, det
+      // betyder bara att någon annan redan skapade samma rad just nu.
+      const { error: skapaFel } = await sb.from("tilldelade_uppgifter").insert({
         target_user_id: mall.target_user_id, text: mall.text, deadline: malDatumIso, prioritet: mall.prioritet,
         created_by: mall.created_by, mall_id: mall.id, aterkommande: false,
       });
+      if (skapaFel && skapaFel.code !== "23505") {
+        console.error("Kunde inte skapa återkommande uppgiftsinstans:", skapaFel);
+      }
     }
   }
   aterkommandeUppgifterKollade = mandagIso;
