@@ -1591,15 +1591,22 @@ async function renderHomeForUser(user) {
 
   const lagerCardWrap = document.getElementById("nav-card-lager");
   if (lagerCardWrap) {
-    const { data: pendingLager } = await sb.from("lageravvikelser").select("id").eq("hanterad", false);
+    const [{ data: pendingLager }, { data: pendingOptimering }] = await Promise.all([
+      sb.from("lageravvikelser").select("id").eq("hanterad", false),
+      sb.from("lager_optimering").select("id").eq("bockad", false),
+    ]);
     const lagerCount = (pendingLager || []).length;
+    const optCount = (pendingOptimering || []).length;
+    const lagerSubParts = [];
+    if (lagerCount > 0) lagerSubParts.push(`${lagerCount} avvikelse${lagerCount === 1 ? "" : "r"}`);
+    if (optCount > 0) lagerSubParts.push(`${optCount} lageroptimering${optCount === 1 ? "" : "ar"}`);
     lagerCardWrap.innerHTML = `
-      <div class="nav-card ${lagerCount > 0 ? "nav-card-alert" : ""}" onclick="showLager()">
+      <div class="nav-card ${lagerSubParts.length ? "nav-card-alert" : ""}" onclick="showLager()">
         <div class="nav-icon nav-icon-c2">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 7L12 3L21 7L12 11L3 7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 7V17L12 21V11" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M21 7V17L12 21" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
         </div>
         <div class="nav-label">Lager</div>
-        <div class="nav-sub">${lagerCount > 0 ? `${lagerCount} avvikelse${lagerCount === 1 ? "" : "r"}` : "Inga avvikelser"}</div>
+        <div class="nav-sub">${lagerSubParts.length ? lagerSubParts.join(" · ") : "Inga avvikelser"}</div>
       </div>
     `;
   }
@@ -5661,7 +5668,7 @@ function renderLagerHub() {
         <div class="nav-sub">Produkter & utgångsdatum</div>
       </div>
 
-      <div class="nav-card" onclick="showLageroptimering()">
+      <div class="nav-card" id="lager-hub-optimering-card" onclick="showLageroptimering()">
         <div class="nav-icon nav-icon-c2">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 12L8 17L21 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
@@ -5670,6 +5677,14 @@ function renderLagerHub() {
       </div>
     </div>
   `;
+  // Visa antal ohanterade optimeringar på kortet (hämtas efter att hubben ritats).
+  sb.from("lager_optimering").select("id").eq("bockad", false).then(({ data }) => {
+    const n = (data || []).length;
+    const kort = document.getElementById("lager-hub-optimering-card");
+    if (!kort || n === 0) return;
+    kort.classList.add("nav-card-alert");
+    kort.querySelector(".nav-sub").textContent = `${n} lageroptimering${n === 1 ? "" : "ar"}`;
+  });
 }
 
 async function showLagerAvvikelser() {
