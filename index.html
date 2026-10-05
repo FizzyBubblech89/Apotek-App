@@ -9099,15 +9099,17 @@ function renderMotenListView() {
   `;
 }
 
-let nyttMoteDraft = { titel: "", datum: isoDate(new Date()), narvarande: [] };
-async function openNyttMoteModal() {
-  nyttMoteDraft = { titel: "", datum: isoDate(new Date()), narvarande: [] };
+let nyttMoteDraft = { id: null, titel: "", datum: isoDate(new Date()), narvarande: [] };
+async function openNyttMoteModal(redigeraMote) {
+  nyttMoteDraft = redigeraMote
+    ? { id: redigeraMote.id, titel: redigeraMote.titel, datum: redigeraMote.datum, narvarande: [...(redigeraMote.narvarande || [])] }
+    : { id: null, titel: "", datum: isoDate(new Date()), narvarande: [] };
   if (!motenAllaProfiler.length) motenAllaProfiler = await fetchProfiles();
   const overlay = document.createElement("div");
   overlay.className = "kassa-modal-overlay";
   overlay.id = "nytt-mote-overlay";
   overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Nytt möte</div><div id="nytt-mote-body"></div></div>`;
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">${redigeraMote ? "Ändra möte" : "Nytt möte"}</div><div id="nytt-mote-body"></div></div>`;
   document.body.appendChild(overlay);
   renderNyttMoteBody();
 }
@@ -9140,7 +9142,7 @@ function renderNyttMoteBody() {
       </div>
     </div>
     <div id="nytt-mote-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
-    <button class="btn-primary" onclick="submitNyttMote()">Skapa möte</button>
+    <button class="btn-primary" onclick="submitNyttMote()">${d.id ? "Spara ändringar" : "Skapa möte"}</button>
     <button class="btn-secondary" onclick="document.getElementById('nytt-mote-overlay').remove()">Avbryt</button>
   `;
 }
@@ -9172,6 +9174,17 @@ async function submitNyttMote() {
   const datum = nyttMoteDraft.datum;
   const narvarande = nyttMoteDraft.narvarande;
   errorBox.textContent = "Sparar…";
+  if (nyttMoteDraft.id) {
+    // Redigerar ett befintligt möte (namn, datum och närvarande).
+    const { error: updFel } = await sb.from("moten").update({ titel, datum, narvarande }).eq("id", nyttMoteDraft.id);
+    if (updFel) { errorBox.textContent = "Kunde inte spara: " + updFel.message; return; }
+    const ov = document.getElementById("nytt-mote-overlay");
+    if (ov) ov.remove();
+    const redigeratId = nyttMoteDraft.id;
+    await loadMoten();
+    await openMote(redigeratId);
+    return;
+  }
   const { error } = await sb.from("moten").insert({ titel, datum, narvarande, created_by: user.id });
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   const overlay = document.getElementById("nytt-mote-overlay");
@@ -9233,9 +9246,10 @@ function renderMoteDetailView() {
   const container = document.getElementById("moten-results");
   container.innerHTML = `
     <div style="font-size:12.5px; color:var(--muted); margin-bottom:6px;">${fmtSvFull(aktivMote.datum)}</div>
-    ${(aktivMote.narvarande || []).length ? `<div style="font-size:11.5px; color:var(--muted); margin-bottom:14px;">👥 Närvarande: ${(aktivMote.narvarande || []).map(uid => { const p = motenAllaProfiler.find(x => x.id === uid); return p ? p.name : null; }).filter(Boolean).join(", ")}</div>` : ""}
+    <div style="font-size:11.5px; color:var(--muted); margin-bottom:14px;">👥 ${(aktivMote.narvarande || []).length ? `Närvarande: ${(aktivMote.narvarande || []).map(uid => { const p = motenAllaProfiler.find(x => x.id === uid); return p ? p.name : null; }).filter(Boolean).join(", ")}` : "Ingen närvaro angiven"}</div>
     <div style="display:flex; gap:8px;">
       <button class="btn-primary" style="flex:1;" onclick="openNyAktivitetModal()">+ Ny aktivitet</button>
+      <button class="btn-secondary" onclick="openNyttMoteModal(aktivMote)" aria-label="Ändra möte">✎</button>
       <button class="btn-secondary" onclick="exportMotePdf('${aktivMote.id}')">📄 PDF</button>
       ${isChef() ? `<button class="btn-secondary" style="color:#b3261e;" onclick="deleteMote('${aktivMote.id}')">✕</button>` : ""}
     </div>
