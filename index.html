@@ -3823,6 +3823,16 @@ let lastHomeNoticeBlocks = [];
 
 let notisSnoozeMap = {}; // notis_key -> snoozed_until (ISO), bara aktiva (ej förfallna) tystningar
 
+function notisKeyMedInnehall(bas, rader) {
+  // Tystningen ska bara gälla de notiser som finns NU. Nycklarna får därför
+  // en kort signatur av vilka poster notisen gäller; tillkommer en ny post
+  // blir nyckeln en annan och notisen visas igen trots tidigare tystning.
+  const ids = (rader || []).map(r => String(r.id)).sort().join(",");
+  let h = 0;
+  for (let i = 0; i < ids.length; i++) h = (h * 31 + ids.charCodeAt(i)) >>> 0;
+  return `${bas}:${h.toString(36)}`;
+}
+
 function isNotisSnoozed(key) {
   return !!notisSnoozeMap[key];
 }
@@ -7913,6 +7923,27 @@ function renderKundmoteHub() {
         <div class="nav-label">Klubbdagar</div>
         <div class="nav-sub">Kommande kampanjer</div>
       </div>
+      <div class="nav-card" onclick="showKundtjanst('oronhal')">
+        <div class="nav-icon nav-icon-c3">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.7"/><path d="M12 3V6M12 18V21M3 12H6M18 12H21" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">Öronhål</div>
+        <div class="nav-sub">Antal &amp; placering</div>
+      </div>
+      <div class="nav-card" onclick="showKundtjanst('blodtryck')">
+        <div class="nav-icon nav-icon-c1">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 20.5C12 20.5 4 15.5 4 9.5C4 6.9 6 5 8.3 5C10 5 11.3 5.9 12 7.1C12.7 5.9 14 5 15.7 5C18 5 20 6.9 20 9.5C20 15.5 12 20.5 12 20.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="nav-label">Blodtryck</div>
+        <div class="nav-sub">Antal &amp; placering</div>
+      </div>
+      <div class="nav-card" onclick="showKundtjanst('inhalation')">
+        <div class="nav-icon nav-icon-c6">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 9H14C16 9 16 6 14 6M4 13H17C19.5 13 19.5 9.5 17 9.5M4 17H12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">Inhalation</div>
+        <div class="nav-sub">Antal &amp; placering</div>
+      </div>
     </div>
   `;
 }
@@ -8240,6 +8271,146 @@ function deleteNpsResultat(id) {
       if (error) { alert("Kunde inte ta bort: " + error.message); return; }
       await loadNpsResultat();
       renderNpsView();
+    }
+  );
+}
+
+/* ---- Kundtjänster: Öronhålstagning, Blodtrycksmätning, Inhalationsvägledning ----
+   Samma upplägg för alla tre: per månad registreras antal och placering i
+   landet, och de senaste 12 månaderna visas i en tabell. */
+const KUNDTJANSTER = {
+  oronhal:   { titel: "Öronhålstagning",        sub: "Antal & placering" },
+  blodtryck: { titel: "Blodtrycksmätning",      sub: "Antal & placering" },
+  inhalation:{ titel: "Inhalationsvägledning",  sub: "Antal & placering" },
+};
+let ktTyp = "oronhal";
+let ktCache = [];
+let ktDraft = null;
+
+async function showKundtjanst(typ) {
+  ktTyp = typ;
+  kundmoteSection = "kt-" + typ;
+  await loadKundtjanst();
+  renderKundtjanstView();
+}
+
+async function loadKundtjanst() {
+  const { data, error } = await sb.from("kundtjanst_resultat").select("*").eq("typ", ktTyp);
+  ktCache = error ? [] : data;
+}
+
+function renderKundtjanstView() {
+  const container = document.getElementById("kundmote-results");
+  const cfg = KUNDTJANSTER[ktTyp];
+  const nu = new Date();
+  const rader = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(nu.getFullYear(), nu.getMonth() - i, 1);
+    const manad = d.getMonth() + 1, ar = d.getFullYear();
+    rader.push({ manad, ar, post: ktCache.find(r => r.manad === manad && r.ar === ar) || null });
+  }
+  const summa = rader.reduce((s, r) => s + (r.post ? r.post.antal : 0), 0);
+  container.innerHTML = `
+    <div style="font-weight:800; font-size:15px; margin-bottom:10px;">${cfg.titel}</div>
+    <button class="btn-primary" onclick="openKundtjanstModal(null)">Registrera nytt resultat</button>
+    <div class="kassa-row-list" style="margin-top:16px;">
+      <div class="kassa-row" style="cursor:default; font-size:11px; font-weight:800; color:var(--muted);">
+        <div style="flex:1;">Månad</div>
+        <div style="width:64px; text-align:right;">Antal</div>
+        <div style="width:78px; text-align:right;">Placering</div>
+      </div>
+      ${rader.map(r => `
+        <div class="kassa-row" onclick="openKundtjanstModal(${r.post ? `'${r.post.id}'` : `null, ${r.manad}, ${r.ar}`})">
+          <div style="flex:1;">${MYS_MANADSNAMN[r.manad]} ${r.ar}</div>
+          <div style="width:64px; text-align:right; font-weight:800;">${r.post ? r.post.antal : "–"}</div>
+          <div style="width:78px; text-align:right; font-weight:800; color:var(--green-700);">${r.post && r.post.placering ? "#" + r.post.placering : "–"}</div>
+        </div>
+      `).join("")}
+      <div class="kassa-row" style="cursor:default; font-weight:800; background:var(--green-100);">
+        <div style="flex:1;">Totalt 12 månader</div>
+        <div style="width:64px; text-align:right;">${summa}</div>
+        <div style="width:78px;"></div>
+      </div>
+    </div>
+    <div style="font-size:11px; color:var(--muted); margin-top:8px;">Tryck på en månad för att registrera eller ändra. Placering 1 = bäst i landet.</div>
+  `;
+}
+
+function openKundtjanstModal(id, manad, ar) {
+  const befintlig = id ? ktCache.find(r => r.id === id) : null;
+  const nu = new Date();
+  ktDraft = befintlig
+    ? { id: befintlig.id, manad: befintlig.manad, ar: befintlig.ar, antal: String(befintlig.antal), placering: befintlig.placering == null ? "" : String(befintlig.placering) }
+    : { id: null, manad: manad || nu.getMonth() + 1, ar: ar || nu.getFullYear(), antal: "", placering: "" };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "kt-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${KUNDTJANSTER[ktTyp].titel} — ${befintlig ? "ändra" : "nytt resultat"}</div>
+      <div class="field-group">
+        <label class="field-label">Månad</label>
+        <select class="field-input" onchange="ktDraft.manad = parseInt(this.value)">
+          ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${ktDraft.manad === m ? "selected" : ""}>${MYS_MANADSNAMN[m]}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">År</label>
+        <input class="field-input" type="number" value="${ktDraft.ar}" oninput="ktDraft.ar = parseInt(this.value)">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Antal</label>
+        <input class="field-input" type="number" min="0" step="1" value="${ktDraft.antal}" placeholder="T.ex. 25" oninput="ktDraft.antal = this.value">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Placering i landet</label>
+        <input class="field-input" type="number" min="1" step="1" value="${ktDraft.placering}" placeholder="T.ex. 14" oninput="ktDraft.placering = this.value">
+      </div>
+      <div id="kt-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitKundtjanst()">Spara</button>
+      ${befintlig && isChef() ? `<button class="btn-secondary" style="color:#b3261e;" onclick="deleteKundtjanst('${befintlig.id}')">Ta bort</button>` : ""}
+      <button class="btn-secondary" onclick="document.getElementById('kt-overlay').remove()">Avbryt</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function submitKundtjanst() {
+  const errorBox = document.getElementById("kt-error");
+  const d = ktDraft;
+  const antal = parseInt(d.antal, 10);
+  const placering = d.placering === "" ? null : parseInt(d.placering, 10);
+  if (d.antal === "" || isNaN(antal) || antal < 0) { errorBox.textContent = "Fyll i antal (0 eller mer)."; return; }
+  if (placering !== null && (isNaN(placering) || placering < 1)) { errorBox.textContent = "Placering måste vara 1 eller högre."; return; }
+  if (!d.ar || isNaN(d.ar)) { errorBox.textContent = "Fyll i ett giltigt år."; return; }
+  errorBox.textContent = "Sparar…";
+  const user = getCurrentUser();
+  const fält = { manad: d.manad, ar: d.ar, antal, placering };
+  const { error } = d.id
+    ? await sb.from("kundtjanst_resultat").update(fält).eq("id", d.id)
+    : await sb.from("kundtjanst_resultat").insert({ ...fält, typ: ktTyp, created_by: user.id });
+  if (error) {
+    errorBox.textContent = error.code === "23505"
+      ? "Den månaden är redan registrerad — tryck på månaden i tabellen för att ändra den."
+      : "Kunde inte spara: " + error.message;
+    return;
+  }
+  document.getElementById("kt-overlay").remove();
+  await loadKundtjanst();
+  renderKundtjanstView();
+}
+
+function deleteKundtjanst(id) {
+  confirmDelete(
+    "Ta bort resultat?",
+    "Månadens resultat tas bort permanent. Det går inte att ångra.",
+    async () => {
+      const { error } = await sb.from("kundtjanst_resultat").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      const o = document.getElementById("kt-overlay"); if (o) o.remove();
+      await loadKundtjanst();
+      renderKundtjanstView();
     }
   );
 }
@@ -11847,43 +12018,43 @@ async function renderTodayWidget(user) {
     `);
   });
 
-  if (pendingLedighet.length && !isNotisSnoozed("ledighet-pending")) {
+  if (pendingLedighet.length && !isNotisSnoozed(notisKeyMedInnehall("ledighet-pending", pendingLedighet))) {
     noticeBlocks.push(`
       <div onclick="goToLedighetAlla()" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
         <span style="flex:1;">🏖️ ${pendingLedighet.length} ledighetsansökning${pendingLedighet.length === 1 ? "" : "ar"} väntar — tryck för att svara</span>
-        ${notisMuteButtonHtml("ledighet-pending")}
+        ${notisMuteButtonHtml(notisKeyMedInnehall("ledighet-pending", pendingLedighet))}
       </div>
     `);
   }
-  if (unseenLedighetSvar.length && !isNotisSnoozed("ledighet-svar-unseen")) {
+  if (unseenLedighetSvar.length && !isNotisSnoozed(notisKeyMedInnehall("ledighet-svar-unseen", unseenLedighetSvar))) {
     noticeBlocks.push(`
       <div onclick="showLedighet()" style="cursor:pointer; background:var(--green-100); border:1px solid var(--green-300); border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
         <span style="flex:1;">✅ Chefen har svarat på ${unseenLedighetSvar.length === 1 ? "din ledighetsansökan" : `${unseenLedighetSvar.length} ledighetsansökningar`} — tryck för att se</span>
-        ${notisMuteButtonHtml("ledighet-svar-unseen")}
+        ${notisMuteButtonHtml(notisKeyMedInnehall("ledighet-svar-unseen", unseenLedighetSvar))}
       </div>
     `);
   }
-  if (pendingOnskemal.length && !isNotisSnoozed("onskemal-pending")) {
+  if (pendingOnskemal.length && !isNotisSnoozed(notisKeyMedInnehall("onskemal-pending", pendingOnskemal))) {
     noticeBlocks.push(`
       <div onclick="openOnskemalModal(lastPendingOnskemal, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
         <span style="flex:1;">📋 ${pendingOnskemal.length} önskemål väntar — tryck för att hantera</span>
-        ${notisMuteButtonHtml("onskemal-pending")}
+        ${notisMuteButtonHtml(notisKeyMedInnehall("onskemal-pending", pendingOnskemal))}
       </div>
     `);
   }
-  if (pendingFriskanmalningar.length && !isNotisSnoozed("friskanmalning-pending")) {
+  if (pendingFriskanmalningar.length && !isNotisSnoozed(notisKeyMedInnehall("friskanmalning-pending", pendingFriskanmalningar))) {
     noticeBlocks.push(`
       <div onclick="openFriskanmalningModal(lastPendingFriskanmalningar, lastAllProfilesForToday)" style="cursor:pointer; background:#fff3e6; border:1px solid #f3b989; border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:#b5590a; display:flex; align-items:center; gap:6px;">
         <span style="flex:1;">🩺 ${pendingFriskanmalningar.length} friskanmälan${pendingFriskanmalningar.length === 1 ? "" : "ar"} väntar — tryck för att bekräfta</span>
-        ${notisMuteButtonHtml("friskanmalning-pending")}
+        ${notisMuteButtonHtml(notisKeyMedInnehall("friskanmalning-pending", pendingFriskanmalningar))}
       </div>
     `);
   }
-  if (unseenOnskemalSvar.length && !isNotisSnoozed("onskemal-svar-unseen")) {
+  if (unseenOnskemalSvar.length && !isNotisSnoozed(notisKeyMedInnehall("onskemal-svar-unseen", unseenOnskemalSvar))) {
     noticeBlocks.push(`
       <div onclick="openOnskemalSvarModal(lastUnseenOnskemalSvar)" style="cursor:pointer; background:var(--green-100); border:1px solid var(--green-300); border-radius:12px; padding:6px 10px; margin-bottom:6px; font-size:11.5px; font-weight:700; color:var(--green-700); display:flex; align-items:center; gap:6px;">
         <span style="flex:1;">✅ Chefen har svarat på ${unseenOnskemalSvar.length === 1 ? "ditt önskemål" : `${unseenOnskemalSvar.length} önskemål`} — tryck för att se</span>
-        ${notisMuteButtonHtml("onskemal-svar-unseen")}
+        ${notisMuteButtonHtml(notisKeyMedInnehall("onskemal-svar-unseen", unseenOnskemalSvar))}
       </div>
     `);
   }
@@ -12608,6 +12779,25 @@ function deleteKassaEntry(id) {
     }
   );
 }
+
+/* Auto-uppdatera startsidans notiser. Tidigare hämtades de bara när man
+   öppnade startsidan, så en medarbetare som lät appen ligga öppen (t.ex.
+   hemskärmsappen i bakgrunden) såg aldrig ett nytt svar förrän omstart. */
+let senasteNotisUppdatering = 0;
+function uppdateraStartsidanOmSynlig() {
+  const home = document.getElementById("view-home");
+  const user = getCurrentUser();
+  if (!home || !user || home.style.display === "none") return;
+  if (Date.now() - senasteNotisUppdatering < 30000) return; // max var 30:e sekund
+  senasteNotisUppdatering = Date.now();
+  renderTodayWidget(user);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") uppdateraStartsidanOmSynlig();
+});
+setInterval(() => {
+  if (document.visibilityState === "visible") uppdateraStartsidanOmSynlig();
+}, 120000);
 
 init();
 initAuth();
