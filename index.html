@@ -3327,17 +3327,39 @@ async function saveUserSchedule(userId) {
   document.getElementById("user-schedule-overlay").remove();
 }
 
+/* Synkfunktionen svarar med ett resultat per person ({user_id, ok, reason}).
+   Tidigare ignorerades det helt — om MedVind-länken för EN person gav fel
+   (utgången länk, HTTP-fel) visades ändå "Synkat", och den personens schema
+   låg kvar på gammal data medan alla andras uppdaterades. */
+function synkResultatFel(data) {
+  const res = (data && Array.isArray(data.results)) ? data.results : [];
+  return res.filter(r => r && r.ok === false);
+}
+async function synkFelText(felLista) {
+  if (!felLista.length) return "";
+  let profiler = [];
+  try { profiler = await fetchProfiles(); } catch (e) {}
+  return felLista.map(r => {
+    const p = profiler.find(x => x.id === r.user_id);
+    return `${p ? p.name : r.user_id}: ${r.reason || "okänt fel"}`;
+  }).join("\n");
+}
+
 async function syncScheduleFromView(context) {
   const btnId = context === "personal" ? "schema-sync-btn" : "shared-schema-sync-btn";
   const btn = document.getElementById(btnId);
   if (btn) btn.textContent = "🔄 Synkar…";
 
-  const { error } = await sb.functions.invoke("bright-processor");
+  const { data: synkData, error } = await sb.functions.invoke("bright-processor");
   if (error) {
     if (btn) btn.textContent = "⚠️ Fel";
     alert("Kunde inte synka: " + error.message);
     setTimeout(() => { if (btn) btn.textContent = "🔄 Synka"; }, 2000);
     return;
+  }
+  const synkFel = synkResultatFel(synkData);
+  if (synkFel.length) {
+    alert("Schemat synkades inte för alla — dessa personers MedVind-länk gav fel och deras schema kan vara inaktuellt:\n\n" + await synkFelText(synkFel));
   }
 
   if (context === "personal") {
@@ -3358,6 +3380,13 @@ async function syncScheduleNow(userId) {
   if (btn) btn.textContent = "🔄 Synkar…";
   const { data, error } = await sb.functions.invoke("bright-processor");
   if (error) { errorBox.textContent = "Kunde inte synka: " + error.message; if (btn) btn.textContent = "🔄 Synka nu"; return; }
+  const minRad = ((data && data.results) || []).find(r => r.user_id === userId);
+  if (minRad && minRad.ok === false) {
+    errorBox.style.color = "#b3261e";
+    errorBox.textContent = "MedVind-synken misslyckades för den här personen: " + (minRad.reason || "okänt fel") + ". Schemat ligger kvar på senast lyckade synk — kontrollera prenumerationslänken.";
+    if (btn) btn.textContent = "🔄 Synka nu";
+    return;
+  }
   const { data: updatedRow } = await sb.from("scheman").select("ics_content").eq("user_id", userId).maybeSingle();
   if (updatedRow) document.getElementById("schedule-ics-text").value = updatedRow.ics_content;
   errorBox.style.color = "var(--green-700)";
