@@ -3645,7 +3645,7 @@ function renderWeek() {
     html += `<div class="week-row ${isToday ? "today" : ""}" onclick="openPersonalDayDetail('${iso}')" style="cursor:pointer;">
       <div class="wd"><div class="name">${dayNames[i].slice(0,3)}</div><div class="num">${d.getDate()}</div></div>
       <div class="status">`;
-    if (absence) html += `<div class="time" style="color:#b3261e; font-weight:700;">Sjuk</div>`;
+    if (absence) html += `<div class="time" style="color:${franvaroTyp(absence).text}; font-weight:700;">${franvaroTyp(absence).label}</div>`;
     else if (!c) html += `<div class="time off">Inget schemalagt</div>`;
     else if (c.isOff) html += `<div class="time off">Ledig</div>`;
     else html += `<div class="time">${fmtTime(c.start)}–${fmtTime(c.end)}</div>`;
@@ -3694,7 +3694,7 @@ function renderMonth() {
       html += `<td onclick="openPersonalDayDetail('${iso}')" style="cursor:pointer;">`;
       html += `<div class="day-num-cell" style="${isToday ? "color:var(--green-700);" : ""} ${inMonth ? "" : "opacity:0.3;"}">${d.getDate()}</div>`;
       html += `<div class="day-cell-inner" style="${inMonth ? "" : "opacity:0.3;"}">`;
-      if (absence) html += `<div class="pill" style="background:#fdecec; color:#b3261e; font-weight:700;">Sjuk</div>`;
+      if (absence) html += `<div class="pill" style="background:${franvaroTyp(absence).bg}; color:${franvaroTyp(absence).text}; font-weight:700;">${franvaroTyp(absence).label}</div>`;
       else if (c && c.isOff) html += `<div class="pill off">Ledig</div>`;
       else if (c) html += `<div class="pill work">${fmtTime(c.start)}–${fmtTime(c.end)}</div>`;
       else html += `<div class="pill empty">–</div>`;
@@ -4172,6 +4172,22 @@ function absenceOn(userId, dateIso) {
   return franvaroCache.find(f => f.user_id === userId && f.forsta_dag <= dateIso && dateIso <= f.planerad_atokomst) || null;
 }
 
+/* Frånvarotyper. MedVinds kalenderflöde innehåller bara arbetstid — när en
+   frånvaroorsak registreras där försvinner passet ur flödet, och orsaken
+   följer inte med. Därför registreras frånvaron med typ i appen (chef kan
+   lägga in åt medarbetare), så att de syns med orsak i stället för att
+   försvinna. Saknas typ (äldre sjukanmälningar) räknas det som sjuk. */
+const FRANVARO_TYPER = {
+  sjuk:          { label: "Sjuk",          bg: "#fdecec", text: "#b3261e", dot: "#c9382d" },
+  vab:           { label: "VAB",           bg: "#fff3e6", text: "#b5590a", dot: "#e8722c" },
+  semester:      { label: "Semester",      bg: "#e6f3fb", text: "#0b6a9c", dot: "#2b8fc4" },
+  tjanstledig:   { label: "Tjänstledig",   bg: "#f0eafc", text: "#6b3fc2", dot: "#8a5be0" },
+  foraldraledig: { label: "Föräldraledig", bg: "#f0eafc", text: "#6b3fc2", dot: "#8a5be0" },
+  annan:         { label: "Frånvaro",      bg: "var(--line)", text: "var(--ink)", dot: "#7a8a84" },
+};
+function franvaroTyp(f) { return FRANVARO_TYPER[(f && f.typ) || "sjuk"] || FRANVARO_TYPER.sjuk; }
+function franvaroDotColor(f) { return f ? franvaroTyp(f).dot : false; }
+
 function daysBetweenInclusive(isoStart, isoEnd) {
   const [y1, m1, d1] = isoStart.split("-").map(Number);
   const [y2, m2, d2] = isoEnd.split("-").map(Number);
@@ -4238,6 +4254,9 @@ function renderFranvaroView() {
     ${myReports.length ? `<div class="kassa-row-list">${myReports.map(f => franvaroRowHtml(f)).join("")}</div>` : `<div class="empty-state">Inga anmälningar ännu.</div>`}
 
     ${isChef() ? `
+      <div class="kassa-section-title" style="margin-top:26px;">Registrera frånvaro åt medarbetare</div>
+      <div style="font-size:11.5px; color:var(--muted); margin-bottom:8px;">För frånvaro du lagt in i MedVind (semester, VAB, sjuk m.m.) — MedVinds kalenderflöde tar bort passet utan att ange orsak, så lägg in den här för att personen ska synas med orsak i schemat.</div>
+      <button class="btn-primary" onclick="openFranvaroChefModal()">+ Registrera frånvaro</button>
       <div class="kassa-section-title" style="margin-top:26px;">Alla anmälningar (chef)</div>
       ${(() => {
         const allReports = [...franvaroCache].sort((a, b) => b.forsta_dag.localeCompare(a.forsta_dag));
@@ -4254,21 +4273,21 @@ function franvaroRowHtml(f, showName) {
     ? fmtSvShort(f.forsta_dag)
     : `${fmtSvShort(f.forsta_dag)} – ${fmtSvShort(f.planerad_atokomst)}`;
   const todayIso = isoDate(new Date());
-  const kanFriskanmala = !showName && f.planerad_atokomst >= todayIso && !f.frisk_anmald;
+  const kanFriskanmala = !showName && f.planerad_atokomst >= todayIso && !f.frisk_anmald && (!f.typ || f.typ === "sjuk" || f.typ === "vab");
   const isOwn = f.user_id === (getCurrentUser() || {}).id;
   const profile = showName ? franvaroAllProfiles.find(p => p.id === f.user_id) : null;
   return `
     <div class="kassa-row" style="cursor:default; align-items:flex-start;">
       <div style="flex:1; min-width:0;">
         ${showName ? `<div style="font-weight:700; font-size:12.5px;">${profile ? profile.name : f.signum}</div>` : ""}
-        <div style="font-weight:700; color:#b3261e;">${range}</div>
+        <div style="font-weight:700; color:${franvaroTyp(f).text};">${range} <span class="org-badge" style="background:${franvaroTyp(f).bg}; color:${franvaroTyp(f).text}; margin-left:4px;">${franvaroTyp(f).label}</span></div>
         ${f.orsak ? `<div style="font-size:12.5px; color:var(--muted); margin-top:2px;">${f.orsak}</div>` : ""}
         ${f.har_kontaktat_chef ? `<div style="font-size:11px; color:var(--muted); margin-top:2px;">✔ Chef kontaktad</div>` : ""}
         ${f.har_sjukintyg ? `<div style="font-size:11px; color:var(--muted); margin-top:2px;">✔ Sjukintyg bekräftat</div>` : ""}
         ${f.frisk_anmald ? `<div style="font-size:11px; color:${f.frisk_hanterad ? "var(--green-700)" : "#b5590a"}; font-weight:700; margin-top:2px;">🩺 Friskanmäld, tillbaka ${fmtSvShort(f.frisk_datum)} ${f.frisk_hanterad ? "· Bekräftat" : "· Väntar på chef"}</div>` : ""}
         ${kanFriskanmala ? `<button class="btn-secondary" style="width:auto; padding:6px 12px; margin-top:8px; border-color:var(--green-300); color:var(--green-700); font-weight:800;" onclick="declareRecovery('${f.id}')">🩺 Anmäl att du är frisk</button>` : ""}
       </div>
-      ${isOwn ? `<button class="kr-edit" onclick="editFranvaro('${f.id}')" aria-label="Redigera">✎</button>` : ""}
+      ${isOwn || isChef() ? `<button class="kr-edit" onclick="editFranvaro('${f.id}')" aria-label="Redigera">✎</button>` : ""}
       <button class="kr-delete" onclick="deleteFranvaro('${f.id}')" aria-label="Ta bort">✕</button>
     </div>
   `;
@@ -4401,6 +4420,7 @@ function editFranvaro(id) {
     planeradAterkomst: f.planerad_atokomst,
     orsak: f.orsak || "",
     harSjukintyg: f.har_sjukintyg,
+    typ: f.typ || "sjuk",
   };
   renderFranvaroEditModal();
 }
@@ -4414,7 +4434,7 @@ function closeFranvaroEdit() {
 function renderFranvaroEditModal() {
   const d = franvaroEditDraft;
   const dayCount = daysBetweenInclusive(d.forstaDag, d.planeradAterkomst);
-  const needsIntyg = dayCount > 7;
+  const needsIntyg = dayCount > 7 && (!d.typ || d.typ === "sjuk") && !isChef();
 
   let overlay = document.getElementById("franvaro-edit-overlay");
   if (!overlay) {
@@ -4427,10 +4447,17 @@ function renderFranvaroEditModal() {
 
   overlay.innerHTML = `
     <div class="kassa-modal-card">
-      <div class="kassa-modal-title">Redigera sjukanmälan</div>
+      <div class="kassa-modal-title">Redigera frånvaro</div>
+      ${isChef() ? `
+        <div class="field-group">
+          <label class="field-label">Typ av frånvaro</label>
+          <select class="field-input" onchange="franvaroEditDraft.typ = this.value">
+            ${Object.entries(FRANVARO_TYPER).map(([k, v]) => `<option value="${k}" ${d.typ === k ? "selected" : ""}>${v.label}</option>`).join("")}
+          </select>
+        </div>` : ""}
       <div class="field-row">
         <div class="field-group">
-          <label class="field-label">Första dag sjuk</label>
+          <label class="field-label">Första dag</label>
           <button type="button" class="field-input kassa-date-btn" onclick="openFranvaroDatePicker('forstaDag', true)">${fmtSvFull(d.forstaDag)}</button>
         </div>
         <div class="field-group">
@@ -4461,7 +4488,7 @@ async function saveFranvaroEdit() {
   const errorBox = document.getElementById("franvaro-edit-error");
   const dayCount = daysBetweenInclusive(d.forstaDag, d.planeradAterkomst);
   if (d.planeradAterkomst < d.forstaDag) { errorBox.textContent = "Planerad återkomst kan inte vara före första sjukdagen."; return; }
-  if (dayCount > 7 && !d.harSjukintyg) { errorBox.textContent = "Bekräfta att du har sjukintyg innan du sparar."; return; }
+  if (dayCount > 7 && !d.harSjukintyg && (!d.typ || d.typ === "sjuk") && !isChef()) { errorBox.textContent = "Bekräfta att du har sjukintyg innan du sparar."; return; }
 
   errorBox.textContent = "Sparar…";
   const { error } = await sb.from("franvaro").update({
@@ -4469,10 +4496,79 @@ async function saveFranvaroEdit() {
     planerad_atokomst: d.planeradAterkomst,
     orsak,
     har_sjukintyg: dayCount > 7 ? d.harSjukintyg : false,
+    ...(isChef() && d.typ ? { typ: d.typ } : {}),
   }).eq("id", d.id);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
 
   closeFranvaroEdit();
+  await loadFranvaroCache();
+  renderFranvaroView();
+}
+
+let franvaroChefDraft = null;
+function openFranvaroChefModal() {
+  const idag = isoDate(new Date());
+  franvaroChefDraft = { userId: "", typ: "sjuk", forstaDag: idag, sistaDag: idag, orsak: "" };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "franvaro-chef-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Registrera frånvaro</div><div id="franvaro-chef-body"></div></div>`;
+  document.body.appendChild(overlay);
+  renderFranvaroChefBody();
+}
+
+function renderFranvaroChefBody() {
+  const d = franvaroChefDraft;
+  document.getElementById("franvaro-chef-body").innerHTML = `
+    <div class="field-group">
+      <label class="field-label">Medarbetare</label>
+      <select class="field-input" onchange="franvaroChefDraft.userId = this.value">
+        <option value="">Välj medarbetare…</option>
+        ${franvaroAllProfiles.map(p => `<option value="${p.id}" ${d.userId === p.id ? "selected" : ""}>${p.name}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Typ av frånvaro</label>
+      <select class="field-input" onchange="franvaroChefDraft.typ = this.value">
+        ${Object.entries(FRANVARO_TYPER).map(([k, v]) => `<option value="${k}" ${d.typ === k ? "selected" : ""}>${v.label}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field-group">
+        <label class="field-label">Första dag</label>
+        <button type="button" class="field-input kassa-date-btn" onclick="openGenericDatePicker(() => franvaroChefDraft.forstaDag, (iso) => { franvaroChefDraft.forstaDag = iso; if (franvaroChefDraft.sistaDag < iso) franvaroChefDraft.sistaDag = iso; renderFranvaroChefBody(); })">${fmtSvFull(d.forstaDag)}</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Sista dag</label>
+        <button type="button" class="field-input kassa-date-btn" onclick="openGenericDatePicker(() => franvaroChefDraft.sistaDag, (iso) => { franvaroChefDraft.sistaDag = iso; renderFranvaroChefBody(); })">${fmtSvFull(d.sistaDag)}</button>
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Anteckning (valfri)</label>
+      <textarea class="field-input" style="min-height:60px;" oninput="franvaroChefDraft.orsak = this.value">${d.orsak}</textarea>
+    </div>
+    <div id="franvaro-chef-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+    <button class="btn-primary" onclick="submitFranvaroChef()">Spara</button>
+    <button class="btn-secondary" onclick="document.getElementById('franvaro-chef-overlay').remove()">Avbryt</button>
+  `;
+}
+
+async function submitFranvaroChef() {
+  const d = franvaroChefDraft;
+  const errorBox = document.getElementById("franvaro-chef-error");
+  const profil = franvaroAllProfiles.find(p => p.id === d.userId);
+  if (!profil) { errorBox.textContent = "Välj en medarbetare."; return; }
+  if (d.sistaDag < d.forstaDag) { errorBox.textContent = "Sista dag kan inte vara före första dag."; return; }
+  errorBox.textContent = "Sparar…";
+  const { error } = await sb.from("franvaro").insert({
+    user_id: profil.id, signum: profil.signum || "",
+    forsta_dag: d.forstaDag, planerad_atokomst: d.sistaDag,
+    orsak: d.orsak.trim(), typ: d.typ,
+    har_sjukintyg: false, har_kontaktat_chef: false,
+  });
+  if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
+  document.getElementById("franvaro-chef-overlay").remove();
   await loadFranvaroCache();
   renderFranvaroView();
 }
@@ -11699,13 +11795,13 @@ function renderSharedWeek() {
       .filter(({ c, absence }) => (c && !c.isOff) || absence) // bara de som faktiskt arbetar (eller är sjukanmälda från ett pass) den här dagen
       .map(({ profile, c, absence }) => {
         let statusHtml;
-        if (absence) statusHtml = `<span style="color:#b3261e; font-weight:700;">Sjuk</span>`;
+        if (absence) statusHtml = `<span style="color:${franvaroTyp(absence).text}; font-weight:700;">${franvaroTyp(absence).label}</span>`;
         else statusHtml = `<span style="font-weight:700;">${fmtTime(c.start)}–${fmtTime(c.end)}</span>`;
         return `
         <div class="kassa-row" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
           <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
-            ${avatarHtml(profile, 24, !!absence)}
-            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;${absence ? " color:#b3261e;" : ""}">${profile.name}</span>
+            ${avatarHtml(profile, 24, franvaroDotColor(absence))}
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;${absence ? ` color:${franvaroTyp(absence).text};` : ""}">${profile.name}</span>
           </div>
           <div style="font-size:12.5px; flex-shrink:0;">${statusHtml}</div>
         </div>
@@ -11754,7 +11850,7 @@ function avatarHtml(profile, size, absent) {
   const fontSize = Math.max(8, Math.round(size * 0.42));
   const dotSize = Math.max(9, Math.round(size * 0.38));
   const dot = absent
-    ? `<span style="position:absolute; bottom:-1px; right:-1px; width:${dotSize}px; height:${dotSize}px; background:#c9382d; border-radius:50%; border:2px solid var(--white); box-shadow:0 1px 2px rgba(0,0,0,0.2);"></span>`
+    ? `<span style="position:absolute; bottom:-1px; right:-1px; width:${dotSize}px; height:${dotSize}px; background:${typeof absent === "string" ? absent : "#c9382d"}; border-radius:50%; border:2px solid var(--white); box-shadow:0 1px 2px rgba(0,0,0,0.2);"></span>`
     : "";
   const bg = profile.avatar_url ? "" : `background:${avatarColorFor(profile)};`;
   return `
@@ -11816,8 +11912,8 @@ function renderSharedMonth() {
         .filter(p => absenceOn(p.id, iso));
       const absentIds = new Set(absentProfiles.map(p => p.id));
       const previewProfiles = [
-        ...workingProfiles.map(p => ({ profile: p, absent: absentIds.has(p.id) })),
-        ...absentProfiles.filter(p => !workingIds.has(p.id)).map(p => ({ profile: p, absent: true })),
+        ...workingProfiles.map(p => ({ profile: p, absent: absentIds.has(p.id) ? franvaroDotColor(absenceOn(p.id, iso)) : false })),
+        ...absentProfiles.filter(p => !workingIds.has(p.id)).map(p => ({ profile: p, absent: franvaroDotColor(absenceOn(p.id, iso)) })),
       ];
       const dayComments = commentsForDay(iso);
       html += `<td onclick="openSharedDayDetail('${iso}')" style="cursor:pointer;">`;
@@ -11872,15 +11968,15 @@ function openSharedDayDetail(iso) {
     const c = consolidateDay(dayEvents);
     const absence = absenceOn(profile.id, iso);
     let statusHtml;
-    if (absence) statusHtml = `<span style="color:#b3261e; font-weight:700;">Sjuk</span>`;
+    if (absence) statusHtml = `<span style="color:${franvaroTyp(absence).text}; font-weight:700;">${franvaroTyp(absence).label}</span>`;
     else if (!c) statusHtml = `<span style="color:var(--muted);">–</span>`;
     else if (c.isOff) statusHtml = `<span style="color:var(--muted);">Ledig</span>`;
     else statusHtml = `<span style="font-weight:700;">${fmtTime(c.start)}–${fmtTime(c.end)}</span>`;
     return `
       <div class="kassa-row" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
         <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
-          ${avatarHtml(profile, 24, !!absence)}
-          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;${absence ? " color:#b3261e;" : ""}">${profile.name}</span>
+          ${avatarHtml(profile, 24, franvaroDotColor(absence))}
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;${absence ? ` color:${franvaroTyp(absence).text};` : ""}">${profile.name}</span>
         </div>
         <div style="font-size:12.5px; flex-shrink:0;">${statusHtml}</div>
       </div>
@@ -12285,12 +12381,12 @@ async function renderTodayWidget(user) {
       <div class="today-date">${dateLabel}</div>
       ${todayPeople.length ? `
         <div class="today-working">
-          ${todayPeople.map(({ profile }) => `
-              <div class="today-chip" style="background:#fdecec; color:#b3261e;">
-                ${avatarHtml(profile, 20, true)}
-                ${profile.name.split(" ")[0]} · Sjuk
+          ${todayPeople.map(({ profile }) => { const typ = franvaroTyp(absenceOn(profile.id, todayIso)); return `
+              <div class="today-chip" style="background:${typ.bg}; color:${typ.text};">
+                ${avatarHtml(profile, 20, typ.dot)}
+                ${profile.name.split(" ")[0]} · ${typ.label}
               </div>
-            `).join("")}
+            `; }).join("")}
         </div>
       ` : ""}
     </div>
