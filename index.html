@@ -791,12 +791,23 @@
   <!-- KAMPANJ VIEW -->
   <div id="view-kampanj" style="display:none;">
     <div class="topbar with-back">
-      <button class="back-btn" onclick="showHome()">
+      <button class="back-btn" onclick="showEgenvard()">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <div class="title">Kampanj</div>
     </div>
     <div class="kassa-content" id="kampanj-results"></div>
+  </div>
+
+  <!-- EGENVÅRD VIEW -->
+  <div id="view-egenvard" style="display:none;">
+    <div class="topbar with-back">
+      <button class="back-btn" onclick="egenvardBack()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="title" id="egenvard-title">Egenvård</div>
+    </div>
+    <div class="kassa-content" id="egenvard-results"></div>
   </div>
 
   <!-- LAGER VIEW -->
@@ -1413,6 +1424,7 @@ async function logout() {
   document.getElementById("view-inkop").style.display = "none";
   document.getElementById("view-snabblankar").style.display = "none";
   document.getElementById("view-kampanj").style.display = "none";
+  document.getElementById("view-egenvard").style.display = "none";
   document.getElementById("view-lager").style.display = "none";
   document.getElementById("view-kvalitet").style.display = "none";
   document.getElementById("view-kundmote").style.display = "none";
@@ -1426,6 +1438,7 @@ async function logout() {
 }
 
 async function renderHomeForUser(user) {
+  touchLastSeen();
   document.getElementById("home-greeting").textContent = user.name;
   renderTodayWidget(user);
 
@@ -1577,14 +1590,19 @@ async function renderHomeForUser(user) {
   if (kampanjCardWrap) {
     const today = isoDate(new Date());
     const { data: aktuellaKampanjer } = await sb.from("kampanjer").select("id").gte("datum", today);
+    const { data: pagaendeRev } = await sb.from("egenvard_revideringar").select("id").lte("fran_datum", today).gte("till_datum", today);
     const count = (aktuellaKampanjer || []).length;
+    const revCount = (pagaendeRev || []).length;
+    const egSub = [];
+    if (count > 0) egSub.push(`${count} kampanj${count === 1 ? "" : "er"}`);
+    if (revCount > 0) egSub.push(`${revCount} revidering${revCount === 1 ? "" : "ar"}`);
     kampanjCardWrap.innerHTML = `
-      <div class="nav-card" onclick="showKampanj()">
+      <div class="nav-card" onclick="showEgenvard()">
         <div class="nav-icon nav-icon-c3">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 11L19 5V17L3 13V11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M7 13V18C7 19.1 7.9 20 9 20H9.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 20.5C12 20.5 4 15.5 4 9.5C4 6.9 6 5 8.3 5C10 5 11.3 5.9 12 7.1C12.7 5.9 14 5 15.7 5C18 5 20 6.9 20 9.5C20 15.5 12 20.5 12 20.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
         </div>
-        <div class="nav-label">Kampanj</div>
-        <div class="nav-sub">${count > 0 ? `${count} aktuell${count === 1 ? "" : "a"}` : "Ladda upp ny"}</div>
+        <div class="nav-label">Egenvård</div>
+        <div class="nav-sub">${egSub.length ? egSub.join(" · ") : "Kampanj & revidering"}</div>
       </div>
     `;
   }
@@ -2817,6 +2835,7 @@ function orgCardHtml(u) {
       ${u.hlr_utbildad ? `<div style="font-size:9.5px; font-weight:700; color:#b3261e; margin-top:2px;">❤️ (HLR utbildad)</div>` : ""}
       <div class="org-name">${u.name}</div>
       <div class="org-signum">${u.signum}</div>
+      ${onlineStatusHtml(u, 9.5)}
       ${badges.length ? `
         <div class="org-badges">
           ${badges.slice(0, 2).map(b => `<span class="org-badge">${b}</span>`).join("")}
@@ -2926,7 +2945,7 @@ async function openOrgPersonDetail(id) {
 async function renderOrgChart() {
   const container = document.getElementById("org-results");
   container.innerHTML = `<div class="empty-state">Laddar…</div>`;
-  const users = await fetchProfiles();
+  const users = await fetchProfiles(true);
   orgChartUsersCache = users;
   if (!users.length) { container.innerHTML = `<div class="empty-state">Inga användare hittades.</div>`; return; }
 
@@ -2957,6 +2976,7 @@ async function renderOrgChart() {
           <div style="flex:1; min-width:0; margin-left:10px;">
             <div style="font-weight:700; font-size:13px;">${u.name}${u.hlr_utbildad ? ` <span style="font-size:11px;">❤️</span>` : ""}</div>
             <div style="font-size:11px; color:var(--muted);">${u.signum}${u.role === "chef" ? " · Chef" : ""}${u.utbildning ? ` · ${u.utbildning}` : ""}</div>
+            ${onlineStatusHtml(u, 10.5)}
           </div>
         </div>
       `).join("")}
@@ -3596,6 +3616,7 @@ async function showHome() {
   document.getElementById("view-inkop").style.display = "none";
   document.getElementById("view-snabblankar").style.display = "none";
   document.getElementById("view-kampanj").style.display = "none";
+  document.getElementById("view-egenvard").style.display = "none";
   document.getElementById("view-lager").style.display = "none";
   document.getElementById("view-kvalitet").style.display = "none";
   document.getElementById("view-kundmote").style.display = "none";
@@ -8114,6 +8135,13 @@ function renderKundmoteHub() {
         <div class="nav-label">Inhalation</div>
         <div class="nav-sub">Antal &amp; placering</div>
       </div>
+      <div class="nav-card" onclick="showLof()">
+        <div class="nav-icon nav-icon-c4">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="4" y="12" width="4" height="8" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="10" y="7" width="4" height="13" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="16" y="3" width="4" height="17" rx="1" stroke="currentColor" stroke-width="1.7"/></svg>
+        </div>
+        <div class="nav-label">LoF</div>
+        <div class="nav-sub">Lofade per vecka</div>
+      </div>
     </div>
   `;
 }
@@ -8558,7 +8586,9 @@ function renderKundtjanstView() {
       </div>
     </div>
     <div style="font-size:11px; color:var(--muted); margin-top:8px;">Tryck på en månad för att registrera eller ändra. Placering 1 = bäst i landet.</div>
+    ${ktTyp === "inhalation" ? `<div id="inh-logg"></div>` : ""}
   `;
+  if (ktTyp === "inhalation") renderInhalationLogg();
 }
 
 function openKundtjanstModal(id, manad, ar) {
@@ -8638,6 +8668,630 @@ function deleteKundtjanst(id) {
       renderKundtjanstView();
     }
   );
+}
+
+/* ---- Hjälpare: HTML-escape, ISO-veckor, onlinestatus ---- */
+function egEsc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function isoVeckaAv(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dag = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - dag);
+  const arStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return { ar: t.getUTCFullYear(), vecka: Math.ceil(((t - arStart) / 86400000 + 1) / 7) };
+}
+function veckansMandag(ar, vecka) {
+  const jan4 = new Date(Date.UTC(ar, 0, 4));
+  const dag = jan4.getUTCDay() || 7;
+  const m = new Date(jan4);
+  m.setUTCDate(jan4.getUTCDate() - dag + 1 + (vecka - 1) * 7);
+  return new Date(m.getUTCFullYear(), m.getUTCMonth(), m.getUTCDate());
+}
+
+let senasteLastSeenTouch = 0;
+function touchLastSeen() {
+  const user = getCurrentUser();
+  if (!user) return;
+  if (Date.now() - senasteLastSeenTouch < 60000) return;
+  senasteLastSeenTouch = Date.now();
+  try { Promise.resolve(sb.rpc("touch_last_seen")).catch(() => {}); } catch (e) {}
+}
+
+function onlineStatusInfo(u) {
+  if (!u.last_seen_at) return { online: false, text: "Ej online ännu" };
+  const t = new Date(u.last_seen_at);
+  const diff = Date.now() - t.getTime();
+  if (diff < 5 * 60000) return { online: true, text: "Online nu" };
+  const hhmm = t.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+  const idag = isoDate(new Date());
+  const igar = isoDate(new Date(Date.now() - 86400000));
+  const dag = isoDate(t);
+  if (dag === idag) return { online: false, text: `Senast idag ${hhmm}` };
+  if (dag === igar) return { online: false, text: `Senast i går ${hhmm}` };
+  return { online: false, text: `Senast ${fmtSvShort(dag)}` };
+}
+function onlineStatusHtml(u, fontPx) {
+  const s = onlineStatusInfo(u);
+  return `<div style="font-size:${fontPx || 10}px; color:${s.online ? "var(--green-700)" : "var(--muted)"}; font-weight:${s.online ? 800 : 500}; margin-top:2px;"><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:${s.online ? "#2e9e5b" : "#b9c0bb"}; margin-right:4px;"></span>${s.text}</div>`;
+}
+
+/* ---- Inhalation: tjänstlogg ---- */
+let inhLoggCache = [];
+let inhLoggDraft = null;
+
+async function renderInhalationLogg() {
+  const box = document.getElementById("inh-logg");
+  if (!box) return;
+  const { data, error } = await sb.from("inhalation_logg").select("*").order("datum", { ascending: false }).order("created_at", { ascending: false }).limit(60);
+  inhLoggCache = error ? [] : data;
+  const utan = inhLoggCache.filter(r => !r.med_korrigering).length;
+  const med = inhLoggCache.filter(r => r.med_korrigering).length;
+  box.innerHTML = `
+    <div style="font-weight:800; font-size:15px; margin:26px 0 4px;">Tjänstlogg – Inhalationsvägledning</div>
+    <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Datum, farmaceut och om vägledningen gjordes med eller utan korrigering.</div>
+    <button class="btn-primary" onclick="openInhLoggModal(null)">+ Ny rad i tjänstloggen</button>
+    <div class="kassa-row-list" style="margin-top:12px;">
+      <div class="kassa-row" style="cursor:default; font-size:10.5px; font-weight:800; color:var(--muted);">
+        <div style="width:74px;">Datum</div>
+        <div style="flex:1;">Farmaceut</div>
+        <div style="width:62px; text-align:center;">Utan korr.</div>
+        <div style="width:62px; text-align:center;">Med korr.</div>
+      </div>
+      ${inhLoggCache.length ? inhLoggCache.map(r => `
+        <div class="kassa-row" onclick="openInhLoggModal('${r.id}')">
+          <div style="width:74px; font-size:12px;">${fmtSvShort(r.datum)}</div>
+          <div style="flex:1; font-size:12.5px;">${egEsc(r.farmaceut_namn)}</div>
+          <div style="width:62px; text-align:center; font-weight:800; color:var(--green-700);">${r.med_korrigering ? "" : "✓"}</div>
+          <div style="width:62px; text-align:center; font-weight:800; color:var(--green-700);">${r.med_korrigering ? "✓" : ""}</div>
+        </div>`).join("") : `<div class="empty-state">Inga rader ännu.</div>`}
+      ${inhLoggCache.length ? `
+      <div class="kassa-row" style="cursor:default; font-weight:800; background:var(--green-100);">
+        <div style="flex:1;">Summa (senaste ${inhLoggCache.length})</div>
+        <div style="width:62px; text-align:center;">${utan}</div>
+        <div style="width:62px; text-align:center;">${med}</div>
+      </div>` : ""}
+    </div>
+  `;
+}
+
+async function openInhLoggModal(id) {
+  const befintlig = id ? inhLoggCache.find(r => r.id === id) : null;
+  const me = getCurrentUser();
+  const profiler = await fetchProfiles();
+  inhLoggDraft = befintlig
+    ? { id: befintlig.id, datum: befintlig.datum, farmaceutId: befintlig.farmaceut_id || "", med: befintlig.med_korrigering }
+    : { id: null, datum: isoDate(new Date()), farmaceutId: me ? me.id : "", med: false };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "inhlogg-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Tjänstlogg — ${befintlig ? "ändra" : "ny rad"}</div>
+      <div class="field-group"><label class="field-label">Datum</label>
+        <input class="field-input" type="date" value="${inhLoggDraft.datum}" oninput="inhLoggDraft.datum = this.value"></div>
+      <div class="field-group"><label class="field-label">Farmaceut</label>
+        <select class="field-input" onchange="inhLoggDraft.farmaceutId = this.value">
+          ${profiler.map(p => `<option value="${p.id}" ${p.id === inhLoggDraft.farmaceutId ? "selected" : ""}>${egEsc(p.name)}</option>`).join("")}
+        </select></div>
+      <div class="field-group"><label class="field-label">Vägledning</label>
+        <select class="field-input" onchange="inhLoggDraft.med = this.value === '1'">
+          <option value="0" ${inhLoggDraft.med ? "" : "selected"}>Utan korrigering</option>
+          <option value="1" ${inhLoggDraft.med ? "selected" : ""}>Med korrigering</option>
+        </select></div>
+      <div id="inhlogg-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitInhLogg()">Spara</button>
+      ${befintlig && isChef() ? `<button class="btn-secondary" style="color:#b3261e;" onclick="deleteInhLogg('${befintlig.id}')">Ta bort</button>` : ""}
+      <button class="btn-secondary" onclick="document.getElementById('inhlogg-overlay').remove()">Avbryt</button>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function submitInhLogg() {
+  const err = document.getElementById("inhlogg-error");
+  const d = inhLoggDraft;
+  if (!d.datum) { err.textContent = "Välj datum."; return; }
+  const profiler = await fetchProfiles();
+  const p = profiler.find(x => x.id === d.farmaceutId);
+  if (!p) { err.textContent = "Välj farmaceut."; return; }
+  err.textContent = "Sparar…";
+  const fält = { datum: d.datum, farmaceut_id: p.id, farmaceut_namn: p.name, med_korrigering: d.med };
+  const { error } = d.id
+    ? await sb.from("inhalation_logg").update(fält).eq("id", d.id)
+    : await sb.from("inhalation_logg").insert({ ...fält, created_by: getCurrentUser().id });
+  if (error) { err.textContent = "Kunde inte spara: " + error.message; return; }
+  document.getElementById("inhlogg-overlay").remove();
+  renderInhalationLogg();
+}
+
+function deleteInhLogg(id) {
+  confirmDelete("Ta bort rad?", "Raden tas bort permanent från tjänstloggen.", async () => {
+    const { error } = await sb.from("inhalation_logg").delete().eq("id", id);
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    const o = document.getElementById("inhlogg-overlay"); if (o) o.remove();
+    renderInhalationLogg();
+  });
+}
+
+/* ---- LoF: antal Lofade per vecka ---- */
+let lofCache = [];
+let lofDraft = null;
+
+async function showLof() {
+  kundmoteSection = "lof";
+  await loadLof();
+  renderLofView();
+}
+async function loadLof() {
+  const { data, error } = await sb.from("lof_resultat").select("*");
+  lofCache = error ? [] : data;
+}
+
+function lofChartHtml(rader) {
+  if (!rader.some(r => r.post)) return `<div class="empty-state" style="margin-bottom:14px;">Inga resultat registrerade ännu.</div>`;
+  const B = 340, padL = 26, padR = 10, topY = 22, H0 = 90, H = topY + H0 + 24;
+  const kol = (B - padL - padR) / rader.length;
+  const max = Math.max(1, ...rader.map(r => r.post ? r.post.antal : 0));
+  const cx = i => padL + i * kol + kol / 2;
+  const staplar = rader.map((r, i) => {
+    const etikett = `<text x="${cx(i)}" y="${H - 8}" font-size="7.5" text-anchor="middle" fill="var(--muted)">v${r.vecka}</text>`;
+    if (!r.post) return etikett;
+    const h = Math.max(2, (r.post.antal / max) * H0), w = kol * 0.62, y = topY + H0 - h;
+    return `<rect x="${cx(i) - w / 2}" y="${y}" width="${w}" height="${h}" rx="3" fill="#4caf82"></rect>
+      <text x="${cx(i)}" y="${y - 4}" font-size="9" text-anchor="middle" fill="var(--ink)" font-weight="700">${r.post.antal}</text>${etikett}`;
+  }).join("");
+  return `
+    <svg viewBox="0 0 ${B} ${H}" style="width:100%; height:auto; background:var(--white); border:1px solid var(--line); border-radius:14px; margin-bottom:6px;">
+      <text x="${padL}" y="13" font-size="9.5" font-weight="800" fill="var(--ink)">Lofade per vecka</text>
+      <line x1="${padL}" y1="${topY + H0}" x2="${B - padR}" y2="${topY + H0}" stroke="var(--line)" stroke-width="1"></line>
+      ${staplar}
+    </svg>
+    <div style="font-size:10px; color:var(--muted); text-align:center; margin-bottom:14px;">Senaste 12 veckorna</div>`;
+}
+
+function renderLofView() {
+  const container = document.getElementById("kundmote-results");
+  const nu = isoVeckaAv(new Date());
+  const rader = [];
+  for (let i = 0; i < 12; i++) {
+    const m = veckansMandag(nu.ar, nu.vecka);
+    m.setDate(m.getDate() - 7 * i);
+    const w = isoVeckaAv(m);
+    rader.push({ ar: w.ar, vecka: w.vecka, mandag: m, post: lofCache.find(r => r.ar === w.ar && r.vecka === w.vecka) || null });
+  }
+  const summa = rader.reduce((s, r) => s + (r.post ? r.post.antal : 0), 0);
+  const kort = d => `${d.getDate()}/${d.getMonth() + 1}`;
+  container.innerHTML = `
+    <div style="font-weight:800; font-size:15px; margin-bottom:10px;">LoF</div>
+    ${lofChartHtml([...rader].reverse())}
+    <button class="btn-primary" onclick="openLofModal(null)">Registrera ny vecka</button>
+    <div class="kassa-row-list" style="margin-top:16px;">
+      <div class="kassa-row" style="cursor:default; font-size:11px; font-weight:800; color:var(--muted);">
+        <div style="flex:1;">Vecka</div><div style="width:64px; text-align:right;">Lofade</div>
+      </div>
+      ${rader.map(r => {
+        const sön = new Date(r.mandag); sön.setDate(sön.getDate() + 6);
+        return `<div class="kassa-row" onclick="openLofModal(${r.post ? `'${r.post.id}'` : `null, ${r.ar}, ${r.vecka}`})">
+          <div style="flex:1;">Vecka ${r.vecka} <span style="font-size:11px; color:var(--muted);">${kort(r.mandag)}–${kort(sön)} ${r.ar}</span></div>
+          <div style="width:64px; text-align:right; font-weight:800;">${r.post ? r.post.antal : "–"}</div></div>`;
+      }).join("")}
+      <div class="kassa-row" style="cursor:default; font-weight:800; background:var(--green-100);">
+        <div style="flex:1;">Totalt 12 veckor</div><div style="width:64px; text-align:right;">${summa}</div>
+      </div>
+    </div>
+    <div style="font-size:11px; color:var(--muted); margin-top:8px;">Tryck på en vecka för att registrera eller ändra.</div>`;
+}
+
+function openLofModal(id, ar, vecka) {
+  const befintlig = id ? lofCache.find(r => r.id === id) : null;
+  const nu = isoVeckaAv(new Date());
+  lofDraft = befintlig
+    ? { id: befintlig.id, ar: befintlig.ar, vecka: befintlig.vecka, antal: String(befintlig.antal) }
+    : { id: null, ar: ar || nu.ar, vecka: vecka || nu.vecka, antal: "" };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "lof-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">LoF — ${befintlig ? "ändra" : "ny vecka"}</div>
+      <div class="field-group"><label class="field-label">År</label>
+        <input class="field-input" type="number" value="${lofDraft.ar}" oninput="lofDraft.ar = parseInt(this.value)"></div>
+      <div class="field-group"><label class="field-label">Vecka</label>
+        <input class="field-input" type="number" min="1" max="53" value="${lofDraft.vecka}" oninput="lofDraft.vecka = parseInt(this.value)"></div>
+      <div class="field-group"><label class="field-label">Antal Lofade</label>
+        <input class="field-input" type="number" min="0" step="1" value="${lofDraft.antal}" placeholder="T.ex. 12" oninput="lofDraft.antal = this.value"></div>
+      <div id="lof-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitLof()">Spara</button>
+      ${befintlig && isChef() ? `<button class="btn-secondary" style="color:#b3261e;" onclick="deleteLof('${befintlig.id}')">Ta bort</button>` : ""}
+      <button class="btn-secondary" onclick="document.getElementById('lof-overlay').remove()">Avbryt</button>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function submitLof() {
+  const err = document.getElementById("lof-error");
+  const d = lofDraft;
+  const antal = parseInt(d.antal, 10);
+  if (d.antal === "" || isNaN(antal) || antal < 0) { err.textContent = "Fyll i antal (0 eller mer)."; return; }
+  if (!d.ar || isNaN(d.ar)) { err.textContent = "Fyll i ett giltigt år."; return; }
+  if (!d.vecka || isNaN(d.vecka) || d.vecka < 1 || d.vecka > 53) { err.textContent = "Vecka måste vara 1–53."; return; }
+  err.textContent = "Sparar…";
+  const fält = { ar: d.ar, vecka: d.vecka, antal };
+  const { error } = d.id
+    ? await sb.from("lof_resultat").update(fält).eq("id", d.id)
+    : await sb.from("lof_resultat").insert({ ...fält, created_by: getCurrentUser().id });
+  if (error) {
+    err.textContent = error.code === "23505" ? "Den veckan är redan registrerad — tryck på veckan i tabellen för att ändra." : "Kunde inte spara: " + error.message;
+    return;
+  }
+  document.getElementById("lof-overlay").remove();
+  await loadLof();
+  renderLofView();
+}
+
+function deleteLof(id) {
+  confirmDelete("Ta bort vecka?", "Veckans resultat tas bort permanent.", async () => {
+    const { error } = await sb.from("lof_resultat").delete().eq("id", id);
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    const o = document.getElementById("lof-overlay"); if (o) o.remove();
+    await loadLof();
+    renderLofView();
+  });
+}
+
+/* ---- Egenvård: Kampanj + Revidering ---- */
+let egSection = "hub";
+let egHyllor = [];        // aktiva hyllor (huvudlista)
+let egRevs = [];
+let egRevRader = [];      // alla revidering_hyllor (id, revidering_id, klar)
+let egRevId = null;
+let egRevDetalj = [];
+let egDraft = null;
+
+function egHideOthers() {
+  ["view-home", "view-kampanj"].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = "none"; });
+  document.getElementById("view-egenvard").style.display = "block";
+}
+
+async function showEgenvard() {
+  egHideOthers();
+  egSection = "hub";
+  renderEgenvardHub();
+}
+
+function egenvardBack() {
+  if (egSection === "hub") { showHome(); return; }
+  if (egSection === "revdetail" || egSection === "hyllor") { showRevideringar(); return; }
+  egSection = "hub";
+  renderEgenvardHub();
+}
+
+function egSetTitle(t) { document.getElementById("egenvard-title").textContent = t; }
+
+async function renderEgenvardHub() {
+  egSetTitle("Egenvård");
+  const today = isoDate(new Date());
+  const [kamp, rev] = await Promise.all([
+    sb.from("kampanjer").select("id").gte("datum", today),
+    sb.from("egenvard_revideringar").select("id").lte("fran_datum", today).gte("till_datum", today),
+  ]);
+  const kc = (kamp.data || []).length, rc = (rev.data || []).length;
+  document.getElementById("egenvard-results").innerHTML = `
+    <div class="btn-grid">
+      <div class="nav-card" onclick="showKampanj()">
+        <div class="nav-icon nav-icon-c3">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 11L19 5V17L3 13V11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M7 13V18C7 19.1 7.9 20 9 20H9.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">Kampanj</div>
+        <div class="nav-sub">${kc > 0 ? `${kc} aktuell${kc === 1 ? "" : "a"}` : "Ladda upp ny"}</div>
+      </div>
+      <div class="nav-card" onclick="showRevideringar()">
+        <div class="nav-icon nav-icon-c2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="5" y="4" width="14" height="17" rx="2.5" stroke="currentColor" stroke-width="1.7"/><path d="M9 4V3M15 4V3M9 10L10.5 11.5L13 8.5M9 16H15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="nav-label">Revidering</div>
+        <div class="nav-sub">${rc > 0 ? `${rc} pågående` : "Hyllor & signering"}</div>
+      </div>
+    </div>`;
+}
+
+async function loadEgenvard() {
+  const [h, r, rr] = await Promise.all([
+    sb.from("egenvard_hyllor").select("*").eq("aktiv", true).order("sortering").order("namn"),
+    sb.from("egenvard_revideringar").select("*").order("fran_datum", { ascending: false }),
+    sb.from("egenvard_revidering_hyllor").select("id, revidering_id, klar"),
+  ]);
+  egHyllor = h.error ? [] : h.data;
+  egRevs = r.error ? [] : r.data;
+  egRevRader = rr.error ? [] : rr.data;
+}
+
+function revStatus(r) {
+  const idag = isoDate(new Date());
+  if (r.till_datum < idag) return { text: "Avslutad", bg: "var(--line)", fg: "var(--muted)" };
+  if (r.fran_datum > idag) return { text: "Kommande", bg: "#fff3d6", fg: "#b5590a" };
+  return { text: "Pågående", bg: "var(--green-100)", fg: "var(--green-700)" };
+}
+
+async function showRevideringar() {
+  egSection = "rev";
+  egSetTitle("Revidering");
+  await loadEgenvard();
+  const lista = egRevs.map(r => {
+    const rader = egRevRader.filter(x => x.revidering_id === r.id);
+    const klara = rader.filter(x => x.klar).length;
+    const s = revStatus(r);
+    return `
+      <div class="kassa-row" onclick="showRevDetalj('${r.id}')" style="align-items:flex-start;">
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:800; font-size:13.5px;">${egEsc(r.namn)}</div>
+          <div style="font-size:11px; color:var(--muted);">${fmtSvShort(r.fran_datum)} – ${fmtSvShort(r.till_datum)}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; background:${s.bg}; color:${s.fg};">${s.text}</div>
+          <div style="font-size:11px; margin-top:4px; font-weight:700;">${klara}/${rader.length} klara</div>
+        </div>
+      </div>`;
+  }).join("");
+  document.getElementById("egenvard-results").innerHTML = `
+    <button class="btn-primary" onclick="openRevModal(null)">+ Ny revidering</button>
+    <button class="btn-secondary" onclick="showHyllor()">Hantera hyllor (${egHyllor.length})</button>
+    <div class="kassa-row-list" style="margin-top:16px;">
+      ${lista || `<div class="empty-state">Inga revideringar ännu.</div>`}
+    </div>`;
+}
+
+/* Skapa / ändra revidering */
+function openRevModal(id) {
+  const befintlig = id ? egRevs.find(r => r.id === id) : null;
+  const idag = isoDate(new Date());
+  egDraft = befintlig
+    ? { id: befintlig.id, namn: befintlig.namn, fran: befintlig.fran_datum, till: befintlig.till_datum, kommentar: befintlig.kommentar || "", valda: null }
+    : { id: null, namn: "", fran: idag, till: idag, kommentar: "", valda: new Set(egHyllor.map(h => h.id)) };
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "rev-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card" style="max-height:88vh; overflow-y:auto;">
+      <div class="kassa-modal-title">${befintlig ? "Ändra revidering" : "Ny revidering"}</div>
+      <div class="field-group"><label class="field-label">Namn på revideringen</label>
+        <input class="field-input" type="text" value="${egEsc(egDraft.namn)}" placeholder="T.ex. Revidering hösten 2026" oninput="egDraft.namn = this.value"></div>
+      <div class="field-group"><label class="field-label">Från och med</label>
+        <input class="field-input" type="date" value="${egDraft.fran}" oninput="egDraft.fran = this.value"></div>
+      <div class="field-group"><label class="field-label">Till och med</label>
+        <input class="field-input" type="date" value="${egDraft.till}" oninput="egDraft.till = this.value"></div>
+      <div class="field-group"><label class="field-label">Kommentar</label>
+        <textarea class="field-input" style="min-height:70px;" placeholder="Fri text…" oninput="egDraft.kommentar = this.value">${egEsc(egDraft.kommentar)}</textarea></div>
+      ${befintlig ? "" : `
+      <div class="field-group"><label class="field-label">Hyllor (alla är förvalda)</label>
+        <div id="rev-hyllor-lista"></div>
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <input class="field-input" id="rev-ny-hylla" type="text" placeholder="Ny hylla…" style="flex:1;">
+          <button class="btn-secondary" style="width:auto; margin:0; padding:0 14px;" onclick="revLaggTillHylla()">Lägg till</button>
+        </div>
+        <div style="font-size:10.5px; color:var(--muted); margin-top:4px;">Nya hyllor sparas i huvudlistan och följer med i alla framtida revideringar.</div>
+      </div>`}
+      <div id="rev-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitRev()">${befintlig ? "Spara" : "Skapa revidering"}</button>
+      <button class="btn-secondary" onclick="document.getElementById('rev-overlay').remove()">Avbryt</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  if (!befintlig) revRitaHyllor();
+}
+
+function revRitaHyllor() {
+  const box = document.getElementById("rev-hyllor-lista");
+  if (!box) return;
+  box.innerHTML = egHyllor.map(h => `
+    <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13px;">
+      <input type="checkbox" ${egDraft.valda.has(h.id) ? "checked" : ""} onchange="revVaxlaHylla('${h.id}', this.checked)">
+      <span>${egEsc(h.namn)}</span>
+    </label>`).join("") || `<div style="font-size:12px; color:var(--muted);">Inga hyllor i huvudlistan ännu.</div>`;
+}
+function revVaxlaHylla(id, on) { if (on) egDraft.valda.add(id); else egDraft.valda.delete(id); }
+
+async function egLaggTillHyllaDb(namn) {
+  const n = namn.trim();
+  if (!n) return { fel: "Skriv ett namn." };
+  const max = egHyllor.reduce((m, h) => Math.max(m, h.sortering || 0), 0);
+  const { data, error } = await sb.from("egenvard_hyllor").insert({ namn: n, sortering: max + 1 }).select().single();
+  if (error) {
+    if (error.code === "23505") {
+      const { data: d2, error: e2 } = await sb.from("egenvard_hyllor").update({ aktiv: true, sortering: max + 1 }).ilike("namn", n).select().single();
+      if (!e2 && d2) { egHyllor.push(d2); return { hylla: d2 }; }
+    }
+    return { fel: "Kunde inte lägga till: " + error.message };
+  }
+  egHyllor.push(data);
+  return { hylla: data };
+}
+
+async function revLaggTillHylla() {
+  const inp = document.getElementById("rev-ny-hylla");
+  const err = document.getElementById("rev-error");
+  const r = await egLaggTillHyllaDb(inp.value);
+  if (r.fel) { err.textContent = r.fel; return; }
+  err.textContent = "";
+  egDraft.valda.add(r.hylla.id);
+  inp.value = "";
+  revRitaHyllor();
+}
+
+async function submitRev() {
+  const err = document.getElementById("rev-error");
+  const d = egDraft;
+  if (!d.namn.trim()) { err.textContent = "Ange ett namn."; return; }
+  if (!d.fran || !d.till) { err.textContent = "Ange från- och till-datum."; return; }
+  if (d.till < d.fran) { err.textContent = "Till-datum kan inte vara före från-datum."; return; }
+  err.textContent = "Sparar…";
+  const fält = { namn: d.namn.trim(), fran_datum: d.fran, till_datum: d.till, kommentar: d.kommentar.trim() || null };
+  if (d.id) {
+    const { error } = await sb.from("egenvard_revideringar").update(fält).eq("id", d.id);
+    if (error) { err.textContent = "Kunde inte spara: " + error.message; return; }
+    document.getElementById("rev-overlay").remove();
+    await loadEgenvard();
+    await showRevDetalj(d.id);
+    return;
+  }
+  const { data, error } = await sb.from("egenvard_revideringar").insert({ ...fält, created_by: getCurrentUser().id }).select().single();
+  if (error) { err.textContent = "Kunde inte spara: " + error.message; return; }
+  const rader = egHyllor.filter(h => d.valda.has(h.id)).map((h, i) => ({ revidering_id: data.id, hylla_id: h.id, hylla_namn: h.namn, sortering: h.sortering || i }));
+  if (rader.length) {
+    const { error: e2 } = await sb.from("egenvard_revidering_hyllor").insert(rader);
+    if (e2) { err.textContent = "Revideringen skapades men hyllorna kunde inte läggas till: " + e2.message; return; }
+  }
+  document.getElementById("rev-overlay").remove();
+  await loadEgenvard();
+  await showRevDetalj(data.id);
+}
+
+/* Detaljvy: signera hyllor */
+async function showRevDetalj(id) {
+  egSection = "revdetail";
+  egRevId = id;
+  if (!egRevs.find(r => r.id === id)) await loadEgenvard();
+  const { data, error } = await sb.from("egenvard_revidering_hyllor").select("*").eq("revidering_id", id).order("sortering").order("hylla_namn");
+  egRevDetalj = error ? [] : data;
+  renderRevDetalj();
+}
+
+async function renderRevDetalj() {
+  const r = egRevs.find(x => x.id === egRevId);
+  if (!r) { showRevideringar(); return; }
+  egSetTitle("Revidering");
+  const profiler = await fetchProfiles();
+  const namnFor = uid => { const p = profiler.find(x => x.id === uid); return p ? p.name : ""; };
+  const klara = egRevDetalj.filter(x => x.klar).length;
+  const tot = egRevDetalj.length;
+  const pct = tot ? Math.round((klara / tot) * 100) : 0;
+  const s = revStatus(r);
+  const saknade = egHyllor.filter(h => !egRevDetalj.some(x => x.hylla_id === h.id));
+  document.getElementById("egenvard-results").innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+      <div>
+        <div style="font-weight:800; font-size:16px;">${egEsc(r.namn)}</div>
+        <div style="font-size:12px; color:var(--muted);">${fmtSvShort(r.fran_datum)} – ${fmtSvShort(r.till_datum)}</div>
+      </div>
+      <div style="font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; background:${s.bg}; color:${s.fg};">${s.text}</div>
+    </div>
+    ${r.kommentar ? `<div style="margin-top:10px; padding:10px 12px; background:var(--white); border:1px solid var(--line); border-radius:12px; font-size:13px; white-space:pre-wrap;">${egEsc(r.kommentar)}</div>` : ""}
+    <div style="margin:14px 0 4px; display:flex; justify-content:space-between; font-size:12px; font-weight:700;"><span>${klara}/${tot} hyllor klara</span><span>${pct}%</span></div>
+    <div style="height:8px; background:var(--line); border-radius:999px; overflow:hidden; margin-bottom:12px;">
+      <div style="height:100%; width:${pct}%; background:linear-gradient(90deg, var(--green-600), var(--green-700));"></div>
+    </div>
+    <div class="kassa-row-list">
+      ${egRevDetalj.map(x => `
+        <div class="kassa-row" onclick="vaxlaRevHylla('${x.id}')">
+          <div style="width:26px; height:26px; border-radius:8px; border:2px solid ${x.klar ? "var(--green-700)" : "var(--line)"}; background:${x.klar ? "var(--green-700)" : "var(--white)"}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; flex-shrink:0;">${x.klar ? "✓" : ""}</div>
+          <div style="flex:1; margin-left:10px; min-width:0;">
+            <div style="font-weight:700; font-size:13.5px; ${x.klar ? "color:var(--muted);" : ""}">${egEsc(x.hylla_namn)}</div>
+            ${x.klar ? `<div style="font-size:10.5px; color:var(--muted);">${egEsc(namnFor(x.klar_av))}${x.klar_tid ? " · " + fmtSvShort(isoDate(new Date(x.klar_tid))) : ""}</div>` : ""}
+          </div>
+        </div>`).join("") || `<div class="empty-state">Inga hyllor i den här revideringen.</div>`}
+    </div>
+    ${saknade.length ? `<button class="btn-secondary" style="margin-top:12px;" onclick="laggTillSaknadeHyllor()">Lägg till ${saknade.length} hylla${saknade.length === 1 ? "" : "r"} som saknas i revideringen</button>` : ""}
+    <button class="btn-secondary" style="margin-top:8px;" onclick="openRevModal('${r.id}')">Ändra namn, datum & kommentar</button>
+    ${isChef() ? `<button class="btn-secondary" style="color:#b3261e;" onclick="deleteRev('${r.id}')">Ta bort revidering</button>` : ""}
+  `;
+}
+
+async function vaxlaRevHylla(id) {
+  const x = egRevDetalj.find(h => h.id === id);
+  if (!x) return;
+  const nyKlar = !x.klar;
+  const upd = { klar: nyKlar, klar_av: nyKlar ? getCurrentUser().id : null, klar_tid: nyKlar ? new Date().toISOString() : null };
+  const { error } = await sb.from("egenvard_revidering_hyllor").update(upd).eq("id", id);
+  if (error) { alert("Kunde inte spara: " + error.message); return; }
+  Object.assign(x, upd);
+  const g = egRevRader.find(h => h.id === id); if (g) g.klar = nyKlar;
+  renderRevDetalj();
+}
+
+async function laggTillSaknadeHyllor() {
+  const saknade = egHyllor.filter(h => !egRevDetalj.some(x => x.hylla_id === h.id));
+  const rader = saknade.map(h => ({ revidering_id: egRevId, hylla_id: h.id, hylla_namn: h.namn, sortering: h.sortering || 0 }));
+  const { error } = await sb.from("egenvard_revidering_hyllor").insert(rader);
+  if (error) { alert("Kunde inte lägga till: " + error.message); return; }
+  await showRevDetalj(egRevId);
+}
+
+function deleteRev(id) {
+  confirmDelete("Ta bort revidering?", "Revideringen och alla signeringar tas bort permanent.", async () => {
+    const { error } = await sb.from("egenvard_revideringar").delete().eq("id", id);
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    showRevideringar();
+  });
+}
+
+/* Hantera huvudlistan med hyllor */
+async function showHyllor() {
+  egSection = "hyllor";
+  egSetTitle("Hyllor");
+  if (!egHyllor.length) await loadEgenvard();
+  renderHyllor();
+}
+function renderHyllor() {
+  document.getElementById("egenvard-results").innerHTML = `
+    <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">Alla hyllor här följer med automatiskt när en ny revidering skapas.</div>
+    <div style="display:flex; gap:6px;">
+      <input class="field-input" id="ny-hylla-namn" type="text" placeholder="Ny hylla…" style="flex:1;">
+      <button class="btn-primary" style="width:auto; margin:0; padding:0 16px;" onclick="laggTillHyllaFranLista()">Lägg till</button>
+    </div>
+    <div id="hylla-error" style="color:#b3261e; font-size:12.5px; font-weight:700; margin-top:6px;"></div>
+    <div class="kassa-row-list" style="margin-top:10px;">
+      ${egHyllor.map(h => `
+        <div class="kassa-row" onclick="openHyllaModal('${h.id}')">
+          <div style="flex:1; font-size:13.5px;">${egEsc(h.namn)}</div>
+          <div style="font-size:11px; color:var(--muted);">Ändra</div>
+        </div>`).join("") || `<div class="empty-state">Inga hyllor ännu.</div>`}
+    </div>`;
+}
+async function laggTillHyllaFranLista() {
+  const inp = document.getElementById("ny-hylla-namn");
+  const r = await egLaggTillHyllaDb(inp.value);
+  if (r.fel) { document.getElementById("hylla-error").textContent = r.fel; return; }
+  renderHyllor();
+}
+function openHyllaModal(id) {
+  const h = egHyllor.find(x => x.id === id);
+  if (!h) return;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "hylla-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">Ändra hylla</div>
+      <div class="field-group"><label class="field-label">Namn</label>
+        <input class="field-input" id="hylla-edit-namn" type="text" value="${egEsc(h.namn)}"></div>
+      <div id="hylla-edit-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="sparaHylla('${h.id}')">Spara</button>
+      <button class="btn-secondary" style="color:#b3261e;" onclick="taBortHylla('${h.id}')">Ta bort från framtida revideringar</button>
+      <button class="btn-secondary" onclick="document.getElementById('hylla-overlay').remove()">Avbryt</button>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+async function sparaHylla(id) {
+  const namn = document.getElementById("hylla-edit-namn").value.trim();
+  if (!namn) { document.getElementById("hylla-edit-error").textContent = "Ange ett namn."; return; }
+  const { error } = await sb.from("egenvard_hyllor").update({ namn }).eq("id", id);
+  if (error) { document.getElementById("hylla-edit-error").textContent = error.code === "23505" ? "Det finns redan en hylla med det namnet." : "Kunde inte spara: " + error.message; return; }
+  document.getElementById("hylla-overlay").remove();
+  await loadEgenvard();
+  renderHyllor();
+}
+function taBortHylla(id) {
+  confirmDelete("Ta bort hylla?", "Hyllan tas bort från huvudlistan och följer inte med i nya revideringar. Gamla revideringar påverkas inte.", async () => {
+    const { error } = await sb.from("egenvard_hyllor").update({ aktiv: false }).eq("id", id);
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    const o = document.getElementById("hylla-overlay"); if (o) o.remove();
+    await loadEgenvard();
+    renderHyllor();
+  });
 }
 
 /* ---- Klubbdagar (kommande kundkampanjer) ---- */
@@ -10203,6 +10857,7 @@ function deleteUtbildning(id) {
 
 async function showKampanj() {
   document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-egenvard").style.display = "none";
   document.getElementById("view-kampanj").style.display = "block";
   kampanjTab = "aktuella";
   kampanjDraft = { titel: "", datum: isoDate(new Date()), file: null };
@@ -13024,6 +13679,7 @@ function deleteKassaEntry(id) {
    hemskärmsappen i bakgrunden) såg aldrig ett nytt svar förrän omstart. */
 let senasteNotisUppdatering = 0;
 function uppdateraStartsidanOmSynlig() {
+  touchLastSeen();
   const home = document.getElementById("view-home");
   const user = getCurrentUser();
   if (!home || !user || home.style.display === "none") return;
@@ -13037,6 +13693,9 @@ document.addEventListener("visibilitychange", () => {
 setInterval(() => {
   if (document.visibilityState === "visible") uppdateraStartsidanOmSynlig();
 }, 120000);
+
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") touchLastSeen(); });
+setInterval(() => { if (document.visibilityState === "visible") touchLastSeen(); }, 120000);
 
 init();
 initAuth();
