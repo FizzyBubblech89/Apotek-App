@@ -9323,9 +9323,10 @@ async function renderRevDetalj() {
             <div style="font-weight:700; font-size:13.5px; ${x.klar ? "color:var(--muted);" : ""}">${egEsc(x.hylla_namn)}</div>
             ${x.klar ? `<div style="font-size:10.5px; color:var(--muted);">${egEsc(namnFor(x.klar_av))}${x.klar_tid ? " · " + fmtSvShort(isoDate(new Date(x.klar_tid))) : ""}</div>` : ""}
           </div>
+          <button aria-label="Ta bort hyllan ur revideringen" onclick="event.stopPropagation(); taBortRevHylla('${x.id}')" style="background:none; border:none; color:#b3261e; font-size:18px; font-weight:700; padding:6px 8px; cursor:pointer;">✕</button>
         </div>`).join("") || `<div class="empty-state">Inga hyllor i den här revideringen.</div>`}
     </div>
-    ${saknade.length ? `<button class="btn-secondary" style="margin-top:12px;" onclick="laggTillSaknadeHyllor()">Lägg till ${saknade.length} hylla${saknade.length === 1 ? "" : "r"} som saknas i revideringen</button>` : ""}
+    <button class="btn-secondary" style="margin-top:12px;" onclick="openRevHyllaModal()">+ Lägg till hylla${saknade.length ? ` (${saknade.length} saknas)` : ""}</button>
     <button class="btn-secondary" style="margin-top:8px;" onclick="openRevModal('${r.id}')">Ändra namn, datum & kommentar</button>
     ${isChef() ? `<button class="btn-secondary" style="color:#b3261e;" onclick="deleteRev('${r.id}')">Ta bort revidering</button>` : ""}
   `;
@@ -9343,11 +9344,66 @@ async function vaxlaRevHylla(id) {
   renderRevDetalj();
 }
 
-async function laggTillSaknadeHyllor() {
+function taBortRevHylla(id) {
+  const x = egRevDetalj.find(h => h.id === id);
+  if (!x) return;
+  confirmDelete(
+    `Ta bort "${x.hylla_namn}"?`,
+    x.klar ? "Hyllan är redan signerad. Den tas bort ur den här revideringen (inte ur huvudlistan)." : "Hyllan tas bort ur den här revideringen (inte ur huvudlistan).",
+    async () => {
+      const { error } = await sb.from("egenvard_revidering_hyllor").delete().eq("id", id);
+      if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+      egRevDetalj = egRevDetalj.filter(h => h.id !== id);
+      egRevRader = egRevRader.filter(h => h.id !== id);
+      renderRevDetalj();
+    }
+  );
+}
+
+let revHyllaVal = null;
+function openRevHyllaModal() {
   const saknade = egHyllor.filter(h => !egRevDetalj.some(x => x.hylla_id === h.id));
-  const rader = saknade.map(h => ({ revidering_id: egRevId, hylla_id: h.id, hylla_namn: h.namn, sortering: h.sortering || 0 }));
+  revHyllaVal = new Set();
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "revhylla-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card" style="max-height:88vh; overflow-y:auto;">
+      <div class="kassa-modal-title">Lägg till hylla</div>
+      ${saknade.length ? `
+      <div class="field-group"><label class="field-label">Ur huvudlistan</label>
+        ${saknade.map(h => `<label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13px;"><input type="checkbox" onchange="revHyllaVaxla('${h.id}', this.checked)"><span>${egEsc(h.namn)}</span></label>`).join("")}
+      </div>` : `<div style="font-size:12px; color:var(--muted); margin-bottom:10px;">Alla hyllor i huvudlistan finns redan i revideringen.</div>`}
+      <div class="field-group"><label class="field-label">Eller skapa en ny hylla</label>
+        <input class="field-input" id="revhylla-ny" type="text" placeholder="Namn på ny hylla…">
+        <div style="font-size:10.5px; color:var(--muted); margin-top:4px;">Sparas även i huvudlistan så den följer med i framtida revideringar.</div>
+      </div>
+      <div id="revhylla-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitRevHylla()">Lägg till</button>
+      <button class="btn-secondary" onclick="document.getElementById('revhylla-overlay').remove()">Avbryt</button>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function revHyllaVaxla(id, on) { if (on) revHyllaVal.add(id); else revHyllaVal.delete(id); }
+
+async function submitRevHylla() {
+  const err = document.getElementById("revhylla-error");
+  const nyttNamn = document.getElementById("revhylla-ny").value.trim();
+  const tillagda = egHyllor.filter(h => revHyllaVal.has(h.id));
+  if (nyttNamn) {
+    const r = await egLaggTillHyllaDb(nyttNamn);
+    if (r.fel) { err.textContent = r.fel; return; }
+    if (!tillagda.some(h => h.id === r.hylla.id) && !egRevDetalj.some(x => x.hylla_id === r.hylla.id)) tillagda.push(r.hylla);
+  }
+  if (!tillagda.length) { err.textContent = "Välj en hylla eller skriv ett nytt namn."; return; }
+  const max = egRevDetalj.reduce((m, x) => Math.max(m, x.sortering || 0), 0);
+  const rader = tillagda.map((h, i) => ({ revidering_id: egRevId, hylla_id: h.id, hylla_namn: h.namn, sortering: max + 1 + i }));
+  err.textContent = "Sparar…";
   const { error } = await sb.from("egenvard_revidering_hyllor").insert(rader);
-  if (error) { alert("Kunde inte lägga till: " + error.message); return; }
+  if (error) { err.textContent = "Kunde inte lägga till: " + error.message; return; }
+  document.getElementById("revhylla-overlay").remove();
+  await loadEgenvard();
   await showRevDetalj(egRevId);
 }
 
