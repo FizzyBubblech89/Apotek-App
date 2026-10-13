@@ -8085,6 +8085,7 @@ async function showKundmote() {
 
 function kundmoteBack() {
   if (kundmoteSection === "hub") { showHome(); return; }
+  if (kundmoteSection === "kt-inhalation" || kundmoteSection === "inh-logg") { showInhalationHub(); return; }
   kundmoteSection = "hub";
   renderKundmoteHub();
 }
@@ -8485,7 +8486,39 @@ let ktTyp = "oronhal";
 let ktCache = [];
 let ktDraft = null;
 
+function showInhalationHub() {
+  ktTyp = "inhalation";
+  kundmoteSection = "inhalation-hub";
+  document.getElementById("kundmote-results").innerHTML = `
+    <div class="btn-grid">
+      <div class="nav-card" onclick="showKundtjanstResultat('inhalation')">
+        <div class="nav-icon nav-icon-c6">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 19L9 12L13 15L20 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="nav-label">Resultat</div>
+        <div class="nav-sub">Antal &amp; placering</div>
+      </div>
+      <div class="nav-card" onclick="showInhLogg()">
+        <div class="nav-icon nav-icon-c2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="5" y="4" width="14" height="17" rx="2.5" stroke="currentColor" stroke-width="1.7"/><path d="M9 9H15M9 13H15M9 17H12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">Tjänstlogg</div>
+        <div class="nav-sub">Datum, farmaceut, korrigering</div>
+      </div>
+    </div>`;
+}
+
+async function showInhLogg() {
+  kundmoteSection = "inh-logg";
+  await renderInhalationLogg();
+}
+
 async function showKundtjanst(typ) {
+  if (typ === "inhalation") { showInhalationHub(); return; }
+  await showKundtjanstResultat(typ);
+}
+
+async function showKundtjanstResultat(typ) {
   ktTyp = typ;
   kundmoteSection = "kt-" + typ;
   await loadKundtjanst();
@@ -8586,9 +8619,7 @@ function renderKundtjanstView() {
       </div>
     </div>
     <div style="font-size:11px; color:var(--muted); margin-top:8px;">Tryck på en månad för att registrera eller ändra. Placering 1 = bäst i landet.</div>
-    ${ktTyp === "inhalation" ? `<div id="inh-logg"></div>` : ""}
   `;
-  if (ktTyp === "inhalation") renderInhalationLogg();
 }
 
 function openKundtjanstModal(id, manad, ar) {
@@ -8722,37 +8753,53 @@ let inhLoggCache = [];
 let inhLoggDraft = null;
 
 async function renderInhalationLogg() {
-  const box = document.getElementById("inh-logg");
-  if (!box) return;
-  const { data, error } = await sb.from("inhalation_logg").select("*").order("datum", { ascending: false }).order("created_at", { ascending: false }).limit(60);
+  const box = document.getElementById("kundmote-results");
+  const { data, error } = await sb.from("inhalation_logg").select("*").order("datum", { ascending: false }).order("created_at", { ascending: false }).limit(2000);
   inhLoggCache = error ? [] : data;
-  const utan = inhLoggCache.filter(r => !r.med_korrigering).length;
-  const med = inhLoggCache.filter(r => r.med_korrigering).length;
-  box.innerHTML = `
-    <div style="font-weight:800; font-size:15px; margin:26px 0 4px;">Tjänstlogg – Inhalationsvägledning</div>
-    <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Datum, farmaceut och om vägledningen gjordes med eller utan korrigering.</div>
-    <button class="btn-primary" onclick="openInhLoggModal(null)">+ Ny rad i tjänstloggen</button>
-    <div class="kassa-row-list" style="margin-top:12px;">
+  // Gruppera månad för månad (nyast först).
+  const grupper = [];
+  inhLoggCache.forEach(r => {
+    const nyckel = String(r.datum).slice(0, 7);
+    let g = grupper.find(x => x.nyckel === nyckel);
+    if (!g) { g = { nyckel, rader: [] }; grupper.push(g); }
+    g.rader.push(r);
+  });
+  const rubrik = `
       <div class="kassa-row" style="cursor:default; font-size:10.5px; font-weight:800; color:var(--muted);">
         <div style="width:74px;">Datum</div>
         <div style="flex:1;">Farmaceut</div>
         <div style="width:62px; text-align:center;">Utan korr.</div>
         <div style="width:62px; text-align:center;">Med korr.</div>
+      </div>`;
+  box.innerHTML = `
+    <div style="font-weight:800; font-size:15px; margin-bottom:4px;">Tjänstlogg – Inhalationsvägledning</div>
+    <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Datum, farmaceut och om vägledningen gjordes med eller utan korrigering.</div>
+    <button class="btn-primary" onclick="openInhLoggModal(null)">+ Ny rad i tjänstloggen</button>
+    ${grupper.length ? grupper.map(g => {
+      const [ar, man] = g.nyckel.split("-");
+      const utan = g.rader.filter(r => !r.med_korrigering).length;
+      const med = g.rader.length - utan;
+      return `
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin:20px 0 6px;">
+        <div style="font-weight:800; font-size:14px;">${MYS_MANADSNAMN[parseInt(man, 10)]} ${ar}</div>
+        <div style="font-size:11px; color:var(--muted); font-weight:700;">${g.rader.length} st</div>
       </div>
-      ${inhLoggCache.length ? inhLoggCache.map(r => `
-        <div class="kassa-row" onclick="openInhLoggModal('${r.id}')">
-          <div style="width:74px; font-size:12px;">${fmtSvShort(r.datum)}</div>
-          <div style="flex:1; font-size:12.5px;">${egEsc(r.farmaceut_namn)}</div>
-          <div style="width:62px; text-align:center; font-weight:800; color:var(--green-700);">${r.med_korrigering ? "" : "✓"}</div>
-          <div style="width:62px; text-align:center; font-weight:800; color:var(--green-700);">${r.med_korrigering ? "✓" : ""}</div>
-        </div>`).join("") : `<div class="empty-state">Inga rader ännu.</div>`}
-      ${inhLoggCache.length ? `
-      <div class="kassa-row" style="cursor:default; font-weight:800; background:var(--green-100);">
-        <div style="flex:1;">Summa (senaste ${inhLoggCache.length})</div>
-        <div style="width:62px; text-align:center;">${utan}</div>
-        <div style="width:62px; text-align:center;">${med}</div>
-      </div>` : ""}
-    </div>
+      <div class="kassa-row-list">
+        ${rubrik}
+        ${g.rader.map(r => `
+          <div class="kassa-row" onclick="openInhLoggModal('${r.id}')">
+            <div style="width:74px; font-size:12px;">${fmtSvShort(r.datum)}</div>
+            <div style="flex:1; font-size:12.5px;">${egEsc(r.farmaceut_namn)}</div>
+            <div style="width:62px; text-align:center; font-weight:800; color:var(--green-700);">${r.med_korrigering ? "" : "✓"}</div>
+            <div style="width:62px; text-align:center; font-weight:800; color:var(--green-700);">${r.med_korrigering ? "✓" : ""}</div>
+          </div>`).join("")}
+        <div class="kassa-row" style="cursor:default; font-weight:800; background:var(--green-100);">
+          <div style="flex:1;">Summa ${MYS_MANADSNAMN[parseInt(man, 10)].toLowerCase()}</div>
+          <div style="width:62px; text-align:center;">${utan}</div>
+          <div style="width:62px; text-align:center;">${med}</div>
+        </div>
+      </div>`;
+    }).join("") : `<div class="empty-state" style="margin-top:16px;">Inga rader ännu.</div>`}
   `;
 }
 
