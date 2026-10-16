@@ -5840,6 +5840,7 @@ async function showLager() {
   document.getElementById("view-lager").style.display = "block";
   lagerSection = "hub";
   renderLagerHub();
+  uppdateraHbHubSub();
 }
 
 function lagerBack() {
@@ -5847,6 +5848,15 @@ function lagerBack() {
   if (lagerSection === "hallbarhet-detalj") { showHallbarhet(); return; }
   lagerSection = "hub";
   renderLagerHub();
+  uppdateraHbHubSub();
+}
+
+async function uppdateraHbHubSub() {
+  try {
+    const { data, error } = await sb.from("lager_hallbarhet_sidor").select("id").not("kommentar", "is", null).eq("kommentar_hanterad", false);
+    const el = document.getElementById("lager-hub-hb-sub");
+    if (!error && el && data && data.length) el.innerHTML = `<span style="color:#b5590a; font-weight:800;">⚠ ${data.length} att hantera</span>`;
+  } catch (e) {}
 }
 
 function renderLagerHub() {
@@ -5882,7 +5892,7 @@ function renderLagerHub() {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="16" rx="2.5" stroke="currentColor" stroke-width="1.7"/><path d="M4 10H20M8 3V7M16 3V7M9 15L11 17L15 13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
         <div class="nav-label">Hållbarhet</div>
-        <div class="nav-sub">Rx &amp; EV, sida för sida</div>
+        <div class="nav-sub" id="lager-hub-hb-sub">Rx &amp; EV, sida för sida</div>
       </div>
 
       <div class="nav-card" id="lager-hub-optimering-card" onclick="showLageroptimering()">
@@ -9476,7 +9486,7 @@ async function showHallbarhet() {
   lagerSection = "hallbarhet";
   const [h, s] = await Promise.all([
     sb.from("lager_hallbarhet").select("*").order("ar", { ascending: false }).order("manad", { ascending: false }),
-    sb.from("lager_hallbarhet_sidor").select("id, hallbarhet_id, klar"),
+    sb.from("lager_hallbarhet_sidor").select("*"),
   ]);
   hbLista = h.error ? [] : h.data;
   hbSidorAlla = s.error ? [] : s.data;
@@ -9484,11 +9494,12 @@ async function showHallbarhet() {
     const sid = hbSidorAlla.filter(x => x.hallbarhet_id === r.id);
     const klara = sid.filter(x => x.klar).length;
     const fardig = sid.length > 0 && klara === sid.length;
+    const oppna = sid.filter(x => x.kommentar && !x.kommentar_hanterad).length;
     return `
       <div class="kassa-row" onclick="showHallbarhetDetalj('${r.id}')" style="flex-direction:column; align-items:stretch; gap:6px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="font-weight:800; font-size:14px;">${MYS_MANADSNAMN[r.manad]} ${r.ar}</div>
-          <div style="font-size:11px; font-weight:800; ${fardig ? "color:var(--green-700);" : "color:var(--muted);"}">${fardig ? "✓ Klar" : `${klara}/${sid.length} sidor`}</div>
+          <div style="font-size:11px; font-weight:800; ${fardig ? "color:var(--green-700);" : "color:var(--muted);"}">${oppna ? `<span style="color:#b5590a; margin-right:8px;">⚠ ${oppna} att hantera</span>` : ""}${fardig ? "✓ Klar" : `${klara}/${sid.length} sidor`}</div>
         </div>
         ${hbProgressHtml(klara, sid.length, 6)}
       </div>`;
@@ -9563,6 +9574,7 @@ async function submitHallbarhet() {
     }
     document.getElementById("hb-overlay").remove();
     await showHallbarhetDetalj(d.id);
+    synkaHbChecklista();
     return;
   }
   if (!d.ar || isNaN(d.ar)) { err.textContent = "Fyll i ett giltigt år."; return; }
@@ -9589,6 +9601,7 @@ async function showHallbarhetDetalj(id) {
   }
   const { data, error } = await sb.from("lager_hallbarhet_sidor").select("*").eq("hallbarhet_id", id).order("sida");
   hbSidor = error ? [] : data;
+  if (!kvalitepunktAllaProfiler.length) kvalitepunktAllaProfiler = await fetchProfiles();
   renderHallbarhetDetalj();
 }
 
@@ -9597,6 +9610,7 @@ function renderHallbarhetDetalj() {
   if (!r) { showHallbarhet(); return; }
   const tot = hbSidor.length, klara = hbSidor.filter(x => x.klar).length;
   const pct = tot ? Math.round((klara / tot) * 100) : 0;
+  const oppnaKomm = hbSidor.filter(x => x.kommentar && !x.kommentar_hanterad);
   const sektion = kat => {
     const sid = hbSidor.filter(x => x.kategori === kat);
     if (!sid.length) return "";
@@ -9608,17 +9622,31 @@ function renderHallbarhetDetalj() {
       </div>
       ${hbProgressHtml(k, sid.length, 6)}
       <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(64px, 1fr)); gap:8px; margin-top:10px;">
-        ${sid.map(x => `
-          <button onclick="vaxlaHbSida('${x.id}')" aria-pressed="${x.klar}" style="display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 0; border-radius:12px; cursor:pointer; font-family:inherit; border:2px solid ${x.klar ? "var(--green-700)" : "var(--line)"}; background:${x.klar ? "var(--green-100)" : "var(--white)"}; color:var(--ink);">
-            <span style="font-size:15px; font-weight:800; color:${x.klar ? "var(--green-700)" : "var(--line)"};">${x.klar ? "✓" : "○"}</span>
-            <span style="font-size:11.5px; font-weight:700;">Sida ${x.sida}</span>
-          </button>`).join("")}
+        ${sid.map(x => {
+          const oppen = x.kommentar && !x.kommentar_hanterad;
+          const harKomm = !!x.kommentar;
+          const kant = oppen ? "#e08a00" : (x.klar ? "var(--green-700)" : "var(--line)");
+          return `
+          <div style="position:relative;">
+            <button onclick="vaxlaHbSida('${x.id}')" aria-pressed="${x.klar}" style="width:100%; display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 0; border-radius:12px; cursor:pointer; font-family:inherit; border:2px solid ${kant}; background:${oppen ? "#fff3d6" : (x.klar ? "var(--green-100)" : "var(--white)")}; color:var(--ink);">
+              <span style="font-size:15px; font-weight:800; color:${x.klar ? "var(--green-700)" : "var(--line)"};">${x.klar ? "✓" : "○"}</span>
+              <span style="font-size:11.5px; font-weight:700;">Sida ${x.sida}</span>
+            </button>
+            <button onclick="openHbKommentar('${x.id}')" aria-label="${harKomm ? "Visa kommentar" : "Lägg till kommentar"}" style="position:absolute; top:-7px; right:-5px; width:24px; height:24px; border-radius:50%; border:1.5px solid ${oppen ? "#e08a00" : "var(--line)"}; background:${oppen ? "#e08a00" : "var(--white)"}; color:${oppen ? "#fff" : "var(--muted)"}; font-size:12px; line-height:1; cursor:pointer; padding:0; opacity:${harKomm ? 1 : 0.75};">${oppen ? "!" : (harKomm ? "✓" : "💬")}</button>
+          </div>`;
+        }).join("")}
       </div>`;
   };
   document.getElementById("lager-results").innerHTML = `
     <div style="font-weight:800; font-size:16px;">Hållbarhet ${MYS_MANADSNAMN[r.manad]} ${r.ar}</div>
     <div style="margin:12px 0 4px; display:flex; justify-content:space-between; font-size:12px; font-weight:700;"><span>${klara}/${tot} sidor klara</span><span>${pct}%</span></div>
     ${hbProgressHtml(klara, tot, 10)}
+    ${tot > 0 && klara === tot ? `<div style="margin-top:10px; font-size:12px; font-weight:700; color:var(--green-700);">✓ Alla sidor klara — punkten "Hållbarhet" i Varuansvarigs checklista är markerad som klar.</div>` : ""}
+    ${oppnaKomm.length ? `
+    <div style="margin-top:14px; padding:10px 12px; background:#fff3d6; border:1px solid #e08a00; border-radius:12px;">
+      <div style="font-weight:800; font-size:12.5px; color:#b5590a; margin-bottom:6px;">⚠ ${oppnaKomm.length} sida${oppnaKomm.length === 1 ? "" : "r"} behöver hanteras</div>
+      ${oppnaKomm.map(x => `<div onclick="openHbKommentar('${x.id}')" style="font-size:12.5px; padding:4px 0; cursor:pointer;"><b>${HB_KATEGORIER[x.kategori]} sida ${x.sida}:</b> ${egEsc(x.kommentar)}</div>`).join("")}
+    </div>` : ""}
     ${sektion("rx")}
     ${sektion("ev")}
     <button class="btn-secondary" style="margin-top:20px;" onclick="openHallbarhetModal('${r.id}')">Ändra antal sidor</button>
@@ -9634,6 +9662,78 @@ async function vaxlaHbSida(id) {
   const { error } = await sb.from("lager_hallbarhet_sidor").update(upd).eq("id", id);
   if (error) { alert("Kunde inte spara: " + error.message); return; }
   Object.assign(x, upd);
+  renderHallbarhetDetalj();
+  synkaHbChecklista();
+}
+
+/* Håller Varuansvarigs checklistepunkt "Hållbarhet" i takt med sidorna:
+   alla sidor bockade => punkten blir klar, annars återställs den. */
+async function synkaHbChecklista() {
+  const r = hbLista.find(x => x.id === hbId);
+  const user = getCurrentUser();
+  if (!r || !user) return;
+  const allaKlara = hbSidor.length > 0 && hbSidor.every(x => x.klar);
+  try {
+    await ensureLagerChecklistaFinns(r.ar, r.manad);
+    const patch = allaKlara
+      ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
+      : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null };
+    const { error } = await sb.from("lager_checklista").update(patch).eq("ar", r.ar).eq("manad", r.manad).eq("aktivitet", "Hållbarhet");
+    if (error) console.error("Kunde inte synka checklistan", error);
+  } catch (e) { console.error(e); }
+}
+
+/* Kommentar på en specifik sida */
+let hbKommId = null;
+function openHbKommentar(id) {
+  const x = hbSidor.find(h => h.id === id);
+  if (!x) return;
+  hbKommId = id;
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "hbkomm-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  const oppen = x.kommentar && !x.kommentar_hanterad;
+  const forf = x.kommentar_av ? (kvalitepunktAllaProfiler.find(p => p.id === x.kommentar_av) || {}).name : "";
+  overlay.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">${HB_KATEGORIER[x.kategori]} sida ${x.sida} — kommentar</div>
+      ${x.kommentar ? `<div style="font-size:11px; color:var(--muted); margin-bottom:8px;">${oppen ? "⚠ Behöver hanteras" : "✓ Hanterad"}${forf ? ` · ${egEsc(forf)}` : ""}${x.kommentar_tid ? ` · ${fmtSvShort(isoDate(new Date(x.kommentar_tid)))}` : ""}</div>` : ""}
+      <div class="field-group">
+        <textarea class="field-input" id="hbkomm-text" style="min-height:90px;" placeholder="T.ex. vara som behöver tas bort, saknas på hyllan…">${egEsc(x.kommentar || "")}</textarea>
+      </div>
+      <div id="hbkomm-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="sparaHbKommentar(false)">${x.kommentar ? "Spara ändring" : "Spara — behöver hanteras"}</button>
+      ${oppen ? `<button class="btn-secondary" onclick="sparaHbKommentar(true)">Markera som hanterad</button>` : ""}
+      ${x.kommentar && !oppen ? `<button class="btn-secondary" onclick="sparaHbKommentar(false)">Öppna igen (behöver hanteras)</button>` : ""}
+      ${x.kommentar ? `<button class="btn-secondary" style="color:#b3261e;" onclick="taBortHbKommentar()">Ta bort kommentar</button>` : ""}
+      <button class="btn-secondary" onclick="document.getElementById('hbkomm-overlay').remove()">Avbryt</button>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function sparaHbKommentar(hanterad) {
+  const x = hbSidor.find(h => h.id === hbKommId);
+  const err = document.getElementById("hbkomm-error");
+  const text = document.getElementById("hbkomm-text").value.trim();
+  if (!text) { err.textContent = "Skriv en kommentar (eller använd Ta bort kommentar)."; return; }
+  const user = getCurrentUser();
+  const upd = { kommentar: text, kommentar_hanterad: !!hanterad };
+  if (text !== x.kommentar) { upd.kommentar_av = user.id; upd.kommentar_tid = new Date().toISOString(); }
+  const { error } = await sb.from("lager_hallbarhet_sidor").update(upd).eq("id", hbKommId);
+  if (error) { err.textContent = /schema cache|column/i.test(error.message) ? "Kolumnen saknas — kör supabase-schema-add-hallbarhet-kommentar.sql i Supabase först." : "Kunde inte spara: " + error.message; return; }
+  Object.assign(x, upd);
+  document.getElementById("hbkomm-overlay").remove();
+  renderHallbarhetDetalj();
+}
+
+async function taBortHbKommentar() {
+  const x = hbSidor.find(h => h.id === hbKommId);
+  const upd = { kommentar: null, kommentar_av: null, kommentar_tid: null, kommentar_hanterad: false };
+  const { error } = await sb.from("lager_hallbarhet_sidor").update(upd).eq("id", hbKommId);
+  if (error) { document.getElementById("hbkomm-error").textContent = "Kunde inte ta bort: " + error.message; return; }
+  Object.assign(x, upd);
+  document.getElementById("hbkomm-overlay").remove();
   renderHallbarhetDetalj();
 }
 
