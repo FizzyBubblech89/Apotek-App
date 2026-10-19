@@ -1629,6 +1629,19 @@ async function renderHomeForUser(user) {
     if (renderSeq !== homeRenderSeq) return;
     const count = (aktuellaKampanjer || []).length;
     const revCount = (pagaendeRev || []).length;
+    // Samlad framdrift för pågående revideringar: klara hyllor / alla hyllor.
+    let revKlara = 0, revTot = 0;
+    try {
+      if (revCount > 0) {
+        const { data: rh } = await sb.from("egenvard_revidering_hyllor").select("id, klar, revidering_id").in("revidering_id", pagaendeRev.map(r => r.id));
+        revTot = (rh || []).length;
+        revKlara = (rh || []).filter(x => x.klar).length;
+      }
+    } catch (e) {}
+    if (renderSeq !== homeRenderSeq) return;
+    const revBarHtml = revTot > 0 ? `<div style="margin-top:7px;">
+        <div style="display:flex; justify-content:space-between; font-size:10.5px; font-weight:700; margin-bottom:3px;"><span>Revidering</span><span>${Math.round((revKlara / revTot) * 100)}%</span></div>
+        ${hbProgressHtml(revKlara, revTot, 5)}</div>` : "";
     const egSub = [];
     if (count > 0) egSub.push(`${count} kampanj${count === 1 ? "" : "er"}`);
     if (revCount > 0) egSub.push(`${revCount} revidering${revCount === 1 ? "" : "ar"}`);
@@ -1639,6 +1652,7 @@ async function renderHomeForUser(user) {
         </div>
         <div class="nav-label">Egenvård</div>
         <div class="nav-sub">${egSub.length ? egSub.join(" · ") : "Kampanj & revidering"}</div>
+        ${revBarHtml}
       </div>
     `;
   }
@@ -1788,8 +1802,68 @@ async function showAdmin() {
         <div class="nav-label">Handdatorer</div>
         <div class="nav-sub">Vem har vilken handdator</div>
       </div>
+
+      <div class="nav-card" onclick="openViktigInfoModal()">
+        <div class="nav-icon nav-icon-c3">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3L22 20H2L12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 10V14M12 17V17.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">Viktig information</div>
+        <div class="nav-sub">Fäst överst på startsidan</div>
+      </div>
     </div>
   `;
+}
+
+/* ---- Viktig information (fäst överst på startsidan) ---- */
+async function openViktigInfoModal() {
+  if (!isChef()) return;
+  let ov = document.getElementById("viktiginfo-overlay");
+  if (ov) ov.remove();
+  ov = document.createElement("div");
+  ov.className = "kassa-modal-overlay";
+  ov.id = "viktiginfo-overlay";
+  ov.onclick = (ev) => { if (ev.target === ov) { ov.remove(); renderTodayWidget(getCurrentUser()); } };
+  ov.innerHTML = `<div class="kassa-modal-card"><div class="kassa-modal-title">Viktig information</div><div id="viktiginfo-body"></div></div>`;
+  document.body.appendChild(ov);
+  await renderViktigInfoBody();
+}
+
+async function renderViktigInfoBody() {
+  const body = document.getElementById("viktiginfo-body");
+  if (!body) return;
+  const { data, error } = await sb.from("viktig_info").select("*").order("created_at", { ascending: true });
+  const lista = error ? [] : data;
+  body.innerHTML = `
+    <div style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Visas överst på alla medarbetares startsida tills du tar bort den.</div>
+    ${error ? `<div style="color:#b3261e; font-size:12px; margin-bottom:8px;">${/schema cache|does not exist/i.test(error.message) ? "Tabellen saknas — kör supabase-schema-add-viktig-info.sql i Supabase först." : egEsc(error.message)}</div>` : ""}
+    ${lista.map(v => `
+      <div style="display:flex; gap:8px; align-items:flex-start; background:#fff3d6; border:1px solid #e08a00; border-radius:10px; padding:8px 10px; margin-bottom:8px;">
+        <div style="flex:1; font-size:13px; white-space:pre-wrap;">${egEsc(v.text)}</div>
+        <button class="btn-secondary" style="width:auto; margin:0; padding:4px 10px; font-size:12px; color:#b3261e;" onclick="taBortViktigInfo('${v.id}')">Ta bort</button>
+      </div>`).join("")}
+    <div class="field-group">
+      <label class="field-label">Ny information</label>
+      <textarea class="field-input" id="viktiginfo-text" rows="3" placeholder="T.ex. Stängt tidigare på fredag"></textarea>
+    </div>
+    <div id="viktiginfo-err" style="color:#b3261e; font-size:12px; min-height:14px;"></div>
+    <button class="btn-primary" onclick="sparaViktigInfo()">Fäst på startsidan</button>
+    <button class="btn-secondary" onclick="document.getElementById('viktiginfo-overlay').remove(); renderTodayWidget(getCurrentUser());">Stäng</button>
+  `;
+}
+
+async function sparaViktigInfo() {
+  const text = document.getElementById("viktiginfo-text").value.trim();
+  const err = document.getElementById("viktiginfo-err");
+  if (!text) { err.textContent = "Skriv något först."; return; }
+  const { error } = await sb.from("viktig_info").insert({ text, created_by: getCurrentUser().id });
+  if (error) { err.textContent = "Kunde inte spara: " + error.message; return; }
+  await renderViktigInfoBody();
+}
+
+async function taBortViktigInfo(id) {
+  const { error } = await sb.from("viktig_info").delete().eq("id", id);
+  if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+  await renderViktigInfoBody();
 }
 
 /* ---- Nyckelkvittenser ---- */
@@ -13547,9 +13621,21 @@ async function renderTodayWidget(user) {
 
   lastHomeNoticeBlocks = noticeBlocks;
   const showCollapsed = noticeBlocks.length > 5;
+  let viktigInfoHtml = "";
+  try {
+    const { data: vi, error: viErr } = await sb.from("viktig_info").select("*").order("created_at", { ascending: true });
+    if (!viErr && vi && vi.length) {
+      viktigInfoHtml = vi.map(v => `
+        <div style="background:#fff3d6; border:1.5px solid #e08a00; border-radius:12px; padding:10px 12px; margin-bottom:8px;">
+          <div style="font-size:11px; font-weight:800; color:#b5590a; letter-spacing:.04em; text-transform:uppercase; margin-bottom:3px;">📌 Viktig information</div>
+          <div style="font-size:13.5px; font-weight:600; color:#3d2a00; white-space:pre-wrap;">${egEsc(v.text)}</div>
+        </div>`).join("");
+    }
+  } catch (e) {}
 
   wrap.innerHTML = `
     <div class="today-card">
+      ${viktigInfoHtml}
       ${dagStjarna || veckaStjarna ? `
         <div style="background:linear-gradient(135deg, #fff8e1, #fff0c2); border:1px solid #f0d878; border-radius:12px; padding:8px 10px; margin-bottom:8px;">
           ${dagStjarna ? stjarnaBannerHtml(dagStjarna, "Dagens stjärna", allProfilesForToday) : ""}
