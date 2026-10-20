@@ -1014,6 +1014,30 @@ function stjarnaBannerHtml(s, label, allProfiles) {
   `;
 }
 
+/* Flera personer kan utses samtidigt: rader med samma motivering visas som en grupp. */
+function stjarnaGruppHtml(rader, label, allProfiles) {
+  const grupper = [];
+  rader.forEach(r => {
+    let g = grupper.find(x => x.motivering === r.motivering);
+    if (!g) { g = { motivering: r.motivering, rader: [] }; grupper.push(g); }
+    g.rader.push(r);
+  });
+  return grupper.map(g => {
+    if (g.rader.length === 1) return stjarnaBannerHtml(g.rader[0], label, allProfiles);
+    const profiler = g.rader.map(r => allProfiles.find(p => p.id === r.user_id)).filter(Boolean);
+    if (!profiler.length) return "";
+    return `
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="display:flex; flex-shrink:0;">${profiler.map((pr, i) => `<div style="${i ? "margin-left:-10px;" : ""}">${avatarHtml(pr, 30, false)}</div>`).join("")}</div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:11px; font-weight:800; color:#92700a; text-transform:uppercase; letter-spacing:0.03em;">⭐ ${label.replace("stjärna", "stjärnor")}</div>
+          <div style="font-size:13px; font-weight:700;">${profiler.map(pr => egEsc(pr.name)).join(", ")}</div>
+          <div style="font-size:11.5px; color:#7a5f10; margin-top:1px;">${egEsc(g.motivering)}</div>
+        </div>
+      </div>`;
+  }).join(`<div style="border-top:1px dashed #e0c266; margin:6px 0;"></div>`);
+}
+
 async function loadStjarnor() {
   const { data, error } = await sb.from("stjarna").select("*").order("created_at", { ascending: false }).limit(30);
   return error ? [] : data;
@@ -1027,22 +1051,29 @@ async function getPinnedStjarnor() {
   const all = await loadStjarnor();
   const todayIso = isoDate(new Date());
   const weekMonday = currentWeekMonday();
-  const dagStjarna = all.find(s => s.typ === "dag" && s.datum === todayIso);
-  const veckaStjarna = all.find(s => s.typ === "vecka" && s.datum === weekMonday);
+  const dagStjarna = all.filter(s => s.typ === "dag" && s.datum === todayIso);
+  const veckaStjarna = all.filter(s => s.typ === "vecka" && s.datum === weekMonday);
   return { dagStjarna, veckaStjarna };
 }
 
+function stjarnaToggleAlla(cb) {
+  document.querySelectorAll(".stjarna-pers").forEach(x => { x.checked = false; x.disabled = cb.checked; });
+}
+
 async function submitStjarna() {
-  const userId = document.getElementById("stjarna-user").value;
+  const alla = document.getElementById("stjarna-alla").checked;
+  const valda = [...document.querySelectorAll(".stjarna-pers:checked")].map(x => x.value);
   const typ = document.getElementById("stjarna-typ").value;
   const motivering = document.getElementById("stjarna-motivering").value.trim();
   const errorBox = document.getElementById("stjarna-error");
-  if (!userId) { errorBox.textContent = "Välj vem som ska utses."; return; }
+  if (!alla && !valda.length) { errorBox.textContent = "Välj minst en person."; return; }
   if (!motivering) { errorBox.textContent = "Skriv en motivering."; return; }
   const chef = getCurrentUser();
   const datum = typ === "dag" ? isoDate(new Date()) : currentWeekMonday();
   errorBox.textContent = "Sparar…";
-  const { error } = await sb.from("stjarna").insert({ user_id: userId === "alla" ? null : userId, motivering, typ, datum, created_by: chef.id });
+  // En rad per person (samma motivering) — de visas sedan ihop som "stjärnor".
+  const rader = (alla ? [null] : valda).map(uid => ({ user_id: uid, motivering, typ, datum, created_by: chef.id }));
+  const { error } = await sb.from("stjarna").insert(rader);
   if (error) { errorBox.textContent = "Kunde inte spara: " + error.message; return; }
   document.getElementById("stjarna-motivering").value = "";
   errorBox.textContent = "";
@@ -1093,12 +1124,18 @@ async function renderStjarnaSection(profilesOverride) {
   wrap.innerHTML = `
     <div class="kassa-section-title">Dagens/veckans stjärna</div>
     <div class="field-group">
-      <label class="field-label">Person</label>
-      <select class="field-input" id="stjarna-user">
-        <option value="">Välj person</option>
-        <option value="alla">Alla (hela arbetsplatsen)</option>
-        ${profiles.map(p => `<option value="${p.id}">${p.name}</option>`).join("")}
-      </select>
+      <label class="field-label">Personer (välj en eller flera)</label>
+      <label class="kassa-check-row" style="margin-bottom:4px;">
+        <input type="checkbox" id="stjarna-alla" onchange="stjarnaToggleAlla(this)">
+        <span class="kassa-check-info"><span class="kassa-check-name">Alla (hela arbetsplatsen)</span></span>
+      </label>
+      <div style="max-height:220px; overflow-y:auto; border:1px solid var(--line); border-radius:12px; padding:4px 8px;">
+        ${profiles.map(p => `
+          <label class="kassa-check-row">
+            <input type="checkbox" class="stjarna-pers" value="${p.id}">
+            <span class="kassa-check-info"><span class="kassa-check-name">${egEsc(p.name)}</span></span>
+          </label>`).join("")}
+      </div>
     </div>
     <div class="field-group">
       <label class="field-label">Typ</label>
@@ -1109,7 +1146,7 @@ async function renderStjarnaSection(profilesOverride) {
     </div>
     <div class="field-group">
       <label class="field-label">Motivering</label>
-      <textarea class="field-input" id="stjarna-motivering" style="min-height:60px;" placeholder="Varför förtjänar personen det?"></textarea>
+      <textarea class="field-input" id="stjarna-motivering" style="min-height:60px;" placeholder="Varför förtjänar de det?"></textarea>
     </div>
     <div id="stjarna-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
     <button class="btn-primary" onclick="submitStjarna()">⭐ Utse</button>
@@ -13649,10 +13686,10 @@ async function renderTodayWidget(user, tyst) {
   wrap.innerHTML = `
     <div class="today-card">
       ${viktigInfoHtml}
-      ${dagStjarna || veckaStjarna ? `
+      ${dagStjarna.length || veckaStjarna.length ? `
         <div style="background:linear-gradient(135deg, #fff8e1, #fff0c2); border:1px solid #f0d878; border-radius:12px; padding:8px 10px; margin-bottom:8px;">
-          ${dagStjarna ? stjarnaBannerHtml(dagStjarna, "Dagens stjärna", allProfilesForToday) : ""}
-          ${veckaStjarna ? `${dagStjarna ? `<div style="border-top:1px dashed #e0c266; margin:6px 0;"></div>` : ""}${stjarnaBannerHtml(veckaStjarna, "Veckans stjärna", allProfilesForToday)}` : ""}
+          ${dagStjarna.length ? stjarnaGruppHtml(dagStjarna, "Dagens stjärna", allProfilesForToday) : ""}
+          ${veckaStjarna.length ? `${dagStjarna.length ? `<div style="border-top:1px dashed #e0c266; margin:6px 0;"></div>` : ""}${stjarnaGruppHtml(veckaStjarna, "Veckans stjärna", allProfilesForToday)}` : ""}
         </div>
       ` : ""}
       ${showCollapsed ? `
