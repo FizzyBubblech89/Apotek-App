@@ -1172,7 +1172,7 @@ async function openAndringsloggModal() {
 
 let profilesCacheData = null;
 let profilesCacheTime = 0;
-const PROFILES_CACHE_MS = 30000; // 30 sekunder — profiler ändras sällan, men force=true kringgår cachen direkt efter en redigering
+const PROFILES_CACHE_MS = 300000; // 5 minuter — profiler ändras sällan, men force=true kringgår cachen direkt efter en redigering
 
 /* ---- Skala ner bilder innan uppladdning ----
    Ett foto direkt från mobilkameran kan vara flera MB, trots att det
@@ -1470,11 +1470,11 @@ async function logout() {
 }
 
 let homeRenderSeq = 0;
-async function renderHomeForUser(user) {
+async function renderHomeForUser(user, tyst) {
   const renderSeq = ++homeRenderSeq;
   touchLastSeen();
   document.getElementById("home-greeting").textContent = user.name;
-  renderTodayWidget(user);
+  renderTodayWidget(user, tyst);
 
   const homeAvatar = document.getElementById("home-avatar");
   const homeAvatarInitial = document.getElementById("home-avatar-initial");
@@ -1502,6 +1502,32 @@ async function renderHomeForUser(user) {
   }
 
   const isChef = user.role === "chef";
+  // Starta ALLA korts frågor direkt och samtidigt. Varje kort väntar sedan bara på sitt eget
+  // svar — tidigare kördes de i en lång kedja, ett steg i taget.
+  const idagIsoHem = isoDate(new Date());
+  const nuHem = new Date();
+  const pInkop = sb.from("inkop").select("id").eq("bestalld", false);
+  const pKampanj = sb.from("kampanjer").select("id").gte("datum", idagIsoHem);
+  const pRevHylla = (async () => {
+    const { data: revs } = await sb.from("egenvard_revideringar").select("id").lte("fran_datum", idagIsoHem).gte("till_datum", idagIsoHem);
+    let hyllor = [];
+    if (revs && revs.length) {
+      const { data } = await sb.from("egenvard_revidering_hyllor").select("id, klar, revidering_id").in("revidering_id", revs.map(r => r.id));
+      hyllor = data || [];
+    }
+    return { revs: revs || [], hyllor };
+  })();
+  const pLager = Promise.all([
+    sb.from("lageravvikelser").select("id, hanterad"),
+    sb.from("lager_optimering").select("id, bockad"),
+    sb.from("lager_hallbarhet_sidor").select("id, kommentar_hanterad").not("kommentar", "is", null),
+  ]);
+  const pHb = (async () => {
+    const { data: hbM } = await sb.from("lager_hallbarhet").select("id").eq("ar", nuHem.getFullYear()).eq("manad", nuHem.getMonth() + 1);
+    if (!hbM || !hbM.length) return [];
+    const { data } = await sb.from("lager_hallbarhet_sidor").select("id, klar").eq("hallbarhet_id", hbM[0].id);
+    return data || [];
+  })();
   const [ideaBadgeCount, kassaFlaggedRes, tasksCountRes, unseenUtbildningCount, pagaendeReklamRes, klaraReklamRes] = await Promise.all([
     isChef ? fetchUnhandledIdeaCount() : fetchUnseenFeedbackCount(),
     isChef ? sb.from("kassaredovisningar").select("id, kassadifferens").eq("granskad", false) : Promise.resolve({ data: [] }),
@@ -1594,7 +1620,7 @@ async function renderHomeForUser(user) {
 
   const inkopCardWrap = document.getElementById("nav-card-inkop");
   if (inkopCardWrap) {
-    const { data: pendingInkop } = await sb.from("inkop").select("id").eq("bestalld", false);
+    const { data: pendingInkop } = await pInkop;
     if (renderSeq !== homeRenderSeq) return;
     const count = (pendingInkop || []).length;
     inkopCardWrap.innerHTML = `
@@ -1623,22 +1649,13 @@ async function renderHomeForUser(user) {
 
   const kampanjCardWrap = document.getElementById("nav-card-kampanj");
   if (kampanjCardWrap) {
-    const today = isoDate(new Date());
-    const { data: aktuellaKampanjer } = await sb.from("kampanjer").select("id").gte("datum", today);
-    const { data: pagaendeRev } = await sb.from("egenvard_revideringar").select("id").lte("fran_datum", today).gte("till_datum", today);
+    const { data: aktuellaKampanjer } = await pKampanj;
+    const { revs: pagaendeRev, hyllor: revHyllor } = await pRevHylla;
     if (renderSeq !== homeRenderSeq) return;
     const count = (aktuellaKampanjer || []).length;
-    const revCount = (pagaendeRev || []).length;
-    // Samlad framdrift för pågående revideringar: klara hyllor / alla hyllor.
-    let revKlara = 0, revTot = 0;
-    try {
-      if (revCount > 0) {
-        const { data: rh } = await sb.from("egenvard_revidering_hyllor").select("id, klar, revidering_id").in("revidering_id", pagaendeRev.map(r => r.id));
-        revTot = (rh || []).length;
-        revKlara = (rh || []).filter(x => x.klar).length;
-      }
-    } catch (e) {}
-    if (renderSeq !== homeRenderSeq) return;
+    const revCount = pagaendeRev.length;
+    const revTot = revHyllor.length;
+    const revKlara = revHyllor.filter(x => x.klar).length;
     const revBarHtml = revTot > 0 ? `<div style="margin-top:7px;">
         <div style="display:flex; justify-content:space-between; font-size:10.5px; font-weight:700; margin-bottom:3px;"><span>Revidering</span><span>${Math.round((revKlara / revTot) * 100)}%</span></div>
         ${hbProgressHtml(revKlara, revTot, 5)}</div>` : "";
@@ -1659,35 +1676,26 @@ async function renderHomeForUser(user) {
 
   const lagerCardWrap = document.getElementById("nav-card-lager");
   if (lagerCardWrap) {
-    const [lagerRes, optRes, hbRes] = await Promise.all([
-      sb.from("lageravvikelser").select("id, hanterad"),
-      sb.from("lager_optimering").select("id, bockad"),
-      sb.from("lager_hallbarhet_sidor").select("id, kommentar_hanterad").not("kommentar", "is", null),
-    ]);
+    const [lagerRes, optRes, hbRes] = await pLager;
     // Filtrera i JS så att rader där hanterad är NULL också räknas (samma filter som listan i Lager).
     const lagerCount = (lagerRes.data || []).filter(a => !a.hanterad).length;
     const optCount = (optRes.data || []).filter(o => !o.bockad).length;
     const hbCount = (hbRes.data || []).filter(x => !x.kommentar_hanterad).length;
     const lagerFel = !!(lagerRes.error || optRes.error);
-    // Hållbarhet för innevarande månad: antal klara sidor / totalt.
     let hbKlara = 0, hbTot = 0;
     try {
-      const nu = new Date();
-      const { data: hbM } = await sb.from("lager_hallbarhet").select("id").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1);
-      if (hbM && hbM.length) {
-        const { data: hbS } = await sb.from("lager_hallbarhet_sidor").select("id, klar").eq("hallbarhet_id", hbM[0].id);
-        hbTot = (hbS || []).length;
-        hbKlara = (hbS || []).filter(x => x.klar).length;
-      }
+      const hbS = await pHb;
+      hbTot = hbS.length;
+      hbKlara = hbS.filter(x => x.klar).length;
     } catch (e) {}
-    const hbBarHtml = hbTot > 0 ? `<div style="margin-top:7px;">
-        <div style="display:flex; justify-content:space-between; font-size:10.5px; font-weight:700; margin-bottom:3px;"><span>Hållbarhet</span><span>${Math.round((hbKlara / hbTot) * 100)}%</span></div>
-        ${hbProgressHtml(hbKlara, hbTot, 5)}</div>` : "";
     const lagerSubParts = [];
     if (lagerCount > 0) lagerSubParts.push(`${lagerCount} avvikelse${lagerCount === 1 ? "" : "r"}`);
     if (optCount > 0) lagerSubParts.push(`${optCount} lageroptimering${optCount === 1 ? "" : "ar"}`);
     if (hbCount > 0) lagerSubParts.push(`${hbCount} hållbarhet`);
     if (renderSeq !== homeRenderSeq) return; // nyare uppritning pågår, undvik att skriva över med gammal data
+    const hbBarHtml = hbTot > 0 ? `<div style="margin-top:7px;">
+        <div style="display:flex; justify-content:space-between; font-size:10.5px; font-weight:700; margin-bottom:3px;"><span>Hållbarhet</span><span>${Math.round((hbKlara / hbTot) * 100)}%</span></div>
+        ${hbProgressHtml(hbKlara, hbTot, 5)}</div>` : "";
     lagerCardWrap.innerHTML = `
       <div class="nav-card ${lagerSubParts.length ? "nav-card-alert" : ""}" onclick="showLager()">
         <div class="nav-icon nav-icon-c2">
@@ -5293,32 +5301,33 @@ function emptyTaskAssignDraft() {
 }
 
 let aterkommandeUppgifterKollade = null; // veckans måndags-ISO, senast kontrollerad denna session
+let ensureAterkommandePromise = null;
 async function ensureAterkommandeUppgifterFinns() {
   const mandagIso = isoDate(startOfWeek(new Date()));
   if (aterkommandeUppgifterKollade === mandagIso) return; // redan kontrollerat denna vecka, denna session
-  const { data: mallar } = await sb.from("tilldelade_uppgifter").select("*").eq("aterkommande", true);
-  if (mallar && mallar.length) {
-    const mandag = startOfWeek(new Date());
-    for (const mall of mallar) {
-      const malDatum = new Date(mandag);
-      malDatum.setDate(malDatum.getDate() + (mall.veckodag - 1));
-      const malDatumIso = isoDate(malDatum);
-      const { data: befintlig } = await sb.from("tilldelade_uppgifter").select("id").eq("mall_id", mall.id).eq("deadline", malDatumIso);
-      if (befintlig && befintlig.length) continue; // redan skapad denna vecka (snabbkoll, se även DB-spärr nedan)
-      // OBS: två flikar/personer kan hinna passera kollen ovan samtidigt
-      // (race condition). Databasen har ett unikt index på (mall_id,
-      // deadline) som sista spärr — ignorera tyst om den träffar, det
-      // betyder bara att någon annan redan skapade samma rad just nu.
-      const { error: skapaFel } = await sb.from("tilldelade_uppgifter").insert({
-        target_user_id: mall.target_user_id, text: mall.text, deadline: malDatumIso, prioritet: mall.prioritet,
-        created_by: mall.created_by, mall_id: mall.id, aterkommande: false,
-      });
-      if (skapaFel && skapaFel.code !== "23505") {
-        console.error("Kunde inte skapa återkommande uppgiftsinstans:", skapaFel);
-      }
+  if (ensureAterkommandePromise) return ensureAterkommandePromise; // pågår redan — dela samma körning
+  ensureAterkommandePromise = (async () => {
+    const { data: mallar } = await sb.from("tilldelade_uppgifter").select("*").eq("aterkommande", true);
+    if (mallar && mallar.length) {
+      const mandag = startOfWeek(new Date());
+      const datumFor = mall => { const d = new Date(mandag); d.setDate(d.getDate() + (mall.veckodag - 1)); return isoDate(d); };
+      // Ett enda anrop för alla mallars befintliga instanser (tidigare ett anrop per mall).
+      const { data: befintliga } = await sb.from("tilldelade_uppgifter").select("mall_id, deadline").in("mall_id", mallar.map(m => m.id));
+      const finns = new Set((befintliga || []).map(x => `${x.mall_id}|${x.deadline}`));
+      const saknas = mallar.filter(m => !finns.has(`${m.id}|${datumFor(m)}`));
+      // OBS: två flikar/personer kan hinna passera kollen ovan samtidigt. Databasen
+      // har ett unikt index på (mall_id, deadline) som sista spärr — 23505 ignoreras tyst.
+      await Promise.all(saknas.map(async mall => {
+        const { error: skapaFel } = await sb.from("tilldelade_uppgifter").insert({
+          target_user_id: mall.target_user_id, text: mall.text, deadline: datumFor(mall), prioritet: mall.prioritet,
+          created_by: mall.created_by, mall_id: mall.id, aterkommande: false,
+        });
+        if (skapaFel && skapaFel.code !== "23505") console.error("Kunde inte skapa återkommande uppgiftsinstans:", skapaFel);
+      }));
     }
-  }
-  aterkommandeUppgifterKollade = mandagIso;
+    aterkommandeUppgifterKollade = mandagIso;
+  })();
+  try { await ensureAterkommandePromise; } finally { ensureAterkommandePromise = null; }
 }
 
 async function loadTaskAssignments() {
@@ -13340,10 +13349,12 @@ function deleteSharedDayComment(id, iso) {
 }
 
 /* ---- Idag-widget (hemskärmen) ---- */
-async function renderTodayWidget(user) {
+async function renderTodayWidget(user, tyst) {
   const wrap = document.getElementById("today-widget");
   if (!wrap) return;
-  wrap.innerHTML = `<div class="today-card"><div class="today-date">Laddar…</div></div>`;
+  // Vid bakgrundsuppdatering (tyst) rensas inget — gamla innehållet står kvar tills det nya är klart.
+  if (!tyst || !wrap.innerHTML.trim()) wrap.innerHTML = `<div class="today-card"><div class="today-date">Laddar…</div></div>`;
+  const viktigP = sb.from("viktig_info").select("*").order("created_at", { ascending: true }).then(r => r, () => ({ data: null, error: true }));
 
   const todayIso = isoDate(new Date());
   const dateLabel = fmtSvFull(todayIso);
@@ -13354,9 +13365,11 @@ async function renderTodayWidget(user) {
   // loadTraningData och en direkt egen hämtning), vilket gjorde hemskärmen
   // onödigt långsam. Alla oberoende frågor körs nu samtidigt istället för
   // en efter en, vilket är den största hastighetsvinsten.
-  const allProfilesForToday = await fetchProfiles();
-  await ensureAterkommandeUppgifterFinns();
-  await cleanupGamlaUppgifter();
+  const [allProfilesForToday] = await Promise.all([
+    fetchProfiles(),
+    ensureAterkommandeUppgifterFinns(),
+    cleanupGamlaUppgifter(),
+  ]);
 
   const [
     ,
@@ -13623,7 +13636,7 @@ async function renderTodayWidget(user) {
   const showCollapsed = noticeBlocks.length > 5;
   let viktigInfoHtml = "";
   try {
-    const { data: vi, error: viErr } = await sb.from("viktig_info").select("*").order("created_at", { ascending: true });
+    const { data: vi, error: viErr } = await viktigP;
     if (!viErr && vi && vi.length) {
       viktigInfoHtml = vi.map(v => `
         <div style="background:#fff3d6; border:1.5px solid #e08a00; border-radius:12px; padding:10px 12px; margin-bottom:8px;">
@@ -14299,7 +14312,7 @@ function uppdateraStartsidanOmSynlig() {
   if (!home || !user || home.style.display === "none") return;
   if (Date.now() - senasteNotisUppdatering < 30000) return; // max var 30:e sekund
   senasteNotisUppdatering = Date.now();
-  renderHomeForUser(user);
+  renderHomeForUser(user, true);
 }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") uppdateraStartsidanOmSynlig();
