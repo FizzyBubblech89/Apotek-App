@@ -13041,6 +13041,9 @@ async function showSharedSchema() {
   sharedAllProfiles = await fetchProfiles();
   await Promise.all([loadSharedSchedules(sharedAllProfiles), loadSharedDayComments(), loadFranvaroCache(), loadDayHeadings()]);
   renderSharedSchema();
+  // Hoppa automatiskt ner till dagens datum i veckovyn.
+  const idag = document.getElementById("shared-idag");
+  if (idag && sharedViewMode === "week") idag.scrollIntoView({ block: "start" });
 }
 
 function profilesWithScheduleOrAbsence(iso) {
@@ -13112,7 +13115,7 @@ function renderSharedWeek() {
     }).join("");
 
     html += `
-      <div class="kassa-section-title" style="${isToday ? "color:var(--green-700);" : ""} margin-top:20px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="openSharedDayDetail('${iso}')">
+      <div ${isToday ? 'id="shared-idag"' : ""} class="kassa-section-title" style="${isToday ? "color:var(--green-700);" : ""} scroll-margin-top:90px; margin-top:20px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="openSharedDayDetail('${iso}')">
         <span>${dayNames[i]} ${d.getDate()}/${d.getMonth() + 1}${isToday ? " · Idag" : ""}</span>
         <span style="font-weight:400; text-transform:none; color:var(--green-700); max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dayComments.length ? `💬 ${dayComments[0].text.length > 28 ? dayComments[0].text.slice(0, 28) + "…" : dayComments[0].text}${dayComments.length > 1 ? ` +${dayComments.length - 1}` : ""}` : "+ Kommentar"}</span>
       </div>
@@ -13386,6 +13389,39 @@ function deleteSharedDayComment(id, iso) {
 }
 
 /* ---- Idag-widget (hemskärmen) ---- */
+let kommandeAllaRubriker = [];
+function openFramtidaHandelser() {
+  const todayIso = isoDate(new Date());
+  const imorgonIso = isoDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  const grupper = [];
+  kommandeAllaRubriker.forEach(r => {
+    const [y, m] = r.datum.split("-").map(Number);
+    const nyckel = `${y}-${m}`;
+    let g = grupper.find(x => x.nyckel === nyckel);
+    if (!g) { g = { nyckel, titel: `${MYS_MANADSNAMN[m]} ${y}`, rader: [] }; grupper.push(g); }
+    g.rader.push(r);
+  });
+  const overlay = document.createElement("div");
+  overlay.className = "kassa-modal-overlay";
+  overlay.id = "framtida-overlay";
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="kassa-modal-card" style="max-height:80vh; overflow-y:auto;">
+      <div class="kassa-modal-title">Framtida händelser</div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Alla händelser de kommande 3 månaderna.</div>
+      ${grupper.length ? grupper.map(g => `
+        <div style="font-size:11px; font-weight:800; color:var(--green-700); text-transform:uppercase; letter-spacing:0.03em; margin:12px 0 4px;">${g.titel}</div>
+        ${g.rader.map(r => `
+          <div onclick="document.getElementById('framtida-overlay').remove(); openHeadingDetailModal('${r.id}', '${r.datum}')" style="cursor:pointer; display:flex; gap:10px; align-items:baseline; padding:6px 0; border-bottom:1px solid var(--line);">
+            <span style="font-size:12px; font-weight:800; color:var(--green-700); white-space:nowrap; min-width:70px;">${r.datum === todayIso ? "Idag" : r.datum === imorgonIso ? "Imorgon" : fmtSvShort(r.datum)}</span>
+            <span style="font-size:13px; font-weight:600; flex:1;">${egEsc(r.text)}</span>
+          </div>`).join("")}
+      `).join("") : `<div class="empty-state">Inga kommande händelser de närmaste 3 månaderna.</div>`}
+      <button class="btn-secondary" style="margin-top:14px;" onclick="document.getElementById('framtida-overlay').remove()">Stäng</button>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
 async function renderTodayWidget(user, tyst) {
   const wrap = document.getElementById("today-widget");
   if (!wrap) return;
@@ -13449,7 +13485,7 @@ async function renderTodayWidget(user, tyst) {
     sb.from("pass_byte").select("id, user_id, status").eq("status", "oppen"),
     sb.from("pass_byte_sedd").select("byte_id").eq("user_id", user.id),
     sb.from("prestationer").select("*").eq("user_id", user.id).eq("notis_dold", false).gte("earned_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
-    sb.from("schema_kommentarer").select("*").eq("typ", "rubrik").gte("datum", todayIso).lte("datum", isoDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))).order("datum", { ascending: true }),
+    sb.from("schema_kommentarer").select("*").eq("typ", "rubrik").gte("datum", todayIso).lte("datum", isoDate(new Date(Date.now() + 92 * 24 * 60 * 60 * 1000))).order("datum", { ascending: true }),
   ]);
 
   notisSnoozeMap = {};
@@ -13529,25 +13565,31 @@ async function renderTodayWidget(user, tyst) {
     `);
   });
 
-  const kommandeRubriker = kommandeRubrikerRes.data || [];
-  if (kommandeRubriker.length) {
+  // Hämtat 3 månader framåt: närmaste 7 dagarna visas i rutan, resten via "Se framtida händelser".
+  kommandeAllaRubriker = kommandeRubrikerRes.data || [];
+  const veckaGrans = isoDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+  const kommandeRubriker = kommandeAllaRubriker.filter(r => r.datum <= veckaGrans);
+  if (kommandeAllaRubriker.length) {
     // Slås ihop med (inte skriver över) den befintliga cachen, så att
     // openHeadingDetailModal fortfarande hittar rätt rad oavsett varifrån
     // den öppnas.
-    kommandeRubriker.forEach(r => { if (!dayHeadingsCache.some(x => x.id === r.id)) dayHeadingsCache.push(r); });
+    kommandeAllaRubriker.forEach(r => { if (!dayHeadingsCache.some(x => x.id === r.id)) dayHeadingsCache.push(r); });
     const imorgonIso = isoDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
     noticeBlocks.push(`
       <div style="background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:8px 10px; margin-bottom:4px;">
-        <div style="font-size:11px; font-weight:800; color:var(--green-700); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:6px;">📌 Kommande händelser</div>
-        ${kommandeRubriker.map(r => {
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+          <div style="font-size:11px; font-weight:800; color:var(--green-700); text-transform:uppercase; letter-spacing:0.03em;">📌 Kommande händelser</div>
+          <div onclick="openFramtidaHandelser()" style="cursor:pointer; font-size:11px; font-weight:800; color:var(--green-700); white-space:nowrap;">Se framtida händelser ›</div>
+        </div>
+        ${kommandeRubriker.length ? kommandeRubriker.map(r => {
           const dagLabel = r.datum === todayIso ? "Idag" : r.datum === imorgonIso ? "Imorgon" : fmtSvShort(r.datum);
           return `
             <div onclick="openHeadingDetailModal('${r.id}', '${r.datum}')" style="cursor:pointer; display:flex; gap:8px; align-items:baseline; padding:3px 0;">
               <span style="font-size:11px; font-weight:800; color:var(--green-700); white-space:nowrap;">${dagLabel}</span>
-              <span style="font-size:12px; font-weight:700; flex:1;">${r.text}</span>
+              <span style="font-size:12px; font-weight:700; flex:1;">${egEsc(r.text)}</span>
             </div>
           `;
-        }).join("")}
+        }).join("") : `<div style="font-size:12px; color:var(--muted);">Inget de närmaste 7 dagarna.</div>`}
       </div>
     `);
   }
