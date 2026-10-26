@@ -1050,7 +1050,7 @@
 
   <header class="top">
     <div>
-      <p class="eyebrow">Bemanning · rullande schema</p>
+      <p class="eyebrow"><a href="./" style="color:inherit; text-decoration:none;">← Till appen</a> · Bemanning · rullande schema</p>
       <h1>Schemagenerator</h1>
       <p class="lede">Fyll i personal och behov, generera ett rullande schema och för in det i Medvind.</p>
     </div>
@@ -5414,9 +5414,9 @@ document.getElementById('saveLocalBtn').addEventListener('click', () => {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'ghost';
-  btn.textContent = 'Hämta medarbetare från appen';
-  btn.addEventListener('click', () => {
-    // Tomma rader (utan namn) ersätts; redan ifyllda personer behåller sina inställningar.
+  btn.textContent = 'Uppdatera medarbetare från appen';
+  // Lägger in medarbetare som saknas i listan (befintliga rader och deras inställningar rörs inte).
+  function syncStaff() {
     const tomt = c => { const v = c.querySelector('.emp-name').value.trim(); return !v || v === '(namnlös)'; };
     [...employeeListEl.children].forEach(c => { if (tomt(c)) c.remove(); });
     const finns = new Set([...employeeListEl.children].map(c => c.querySelector('.emp-name').value.trim().toLowerCase()));
@@ -5425,7 +5425,11 @@ document.getElementById('saveLocalBtn').addEventListener('click', () => {
       addEmployeeRow({ name: s.name, pct: s.pct, category: s.category, weekendPolicy: s.weekendPolicy, weekendGroup: s.weekendGroup });
     });
     document.getElementById('empCount').value = employeeListEl.children.length || 1;
-  });
+  }
+  btn.addEventListener('click', syncStaff);
+  syncStaff(); // direkt vid start
+  document.getElementById('pharmacySelect').addEventListener('change', () => setTimeout(syncStaff, 0));
+  document.getElementById('newPharmacyBtn').addEventListener('click', () => setTimeout(syncStaff, 100));
   wrap.appendChild(btn);
   addBtn.parentElement.insertAdjacentElement('afterend', wrap);
 })();
@@ -5460,14 +5464,8 @@ document.getElementById('saveLocalBtn').addEventListener('click', () => {
   if (row && row.data && row.data.pharmacies) mem['schemagenerator_pharmacies_v1'] = JSON.stringify(row.data);
 
   try {
-    const [pr, mr] = await Promise.all([
-      sb.from('profiles').select('id, name').order('name'),
-      sb.from('medvind_medarbetare').select('*'),
-    ]);
-    const rader = mr.data || [];
-    window.__genStaff = (pr.data || []).map(p => ({ p, r: rader.find(x => x.user_id === p.id) || { aktiv: true, grad: 100, kategori: 'recept', helg: 'alla', helggrupp: 1 } }))
-      .filter(({ r }) => r.aktiv)
-      .map(({ p, r }) => ({ name: p.name, pct: r.grad, category: r.kategori, weekendPolicy: r.helg, weekendGroup: r.helggrupp }));
+    const pr = await sb.from('profiles').select('id, name').order('name');
+    window.__genStaff = (pr.data || []).map(p => ({ name: p.name, pct: 100, category: 'recept', weekendPolicy: 'alla', weekendGroup: 1 }));
   } catch (e) { window.__genStaff = []; }
 
   // Ersätter webbläsarens lagring: allt läses/skrivs mot databasen (en rad).
