@@ -1062,7 +1062,7 @@
 
   <section class="card" id="pharmacyCard">
     <h2>Apotek</h2>
-    <p class="hint">Välj vilket apotek du jobbar med, eller skapa ett nytt. Varje apotek sparar sin egen personal, sina egna passmallar och period, i Apoteks-appens databas (kräver att du är inloggad som chef i appen).</p>
+    <p class="hint">Välj vilket apotek du jobbar med, eller skapa ett nytt. Varje apotek sparar sin egen personal, sina egna passmallar och period, i Apoteks-appens databas (kräver att du är inloggad som chef i appen). Ändringar sparas automatiskt.</p>
     <div class="row" style="margin-bottom:10px;">
       <div class="field" style="flex:1 1 240px;">
         <label for="pharmacySelect">Apotek</label>
@@ -5433,6 +5433,28 @@ document.getElementById('saveLocalBtn').addEventListener('click', () => {
   wrap.appendChild(btn);
   addBtn.parentElement.insertAdjacentElement('afterend', wrap);
 })();
+
+// ---------- Spara automatiskt ----------
+// Allt som ändras sparas under valt apotek efter en kort paus — ingen "Spara ändringar" behövs.
+(function autoSave() {
+  let t = null;
+  function save() {
+    const name = currentPharmacyName();
+    if (!name) return;
+    try {
+      const store = loadPharmacyStore();
+      store.pharmacies[name] = collectState();
+      store.lastSelected = name;
+      savePharmacyStore(store);
+      setLocalSaveStatus('Sparat automatiskt ' + new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }), 'ok');
+    } catch (err) { setLocalSaveStatus('Kunde inte spara: ' + err.message, 'err'); }
+  }
+  const later = () => { clearTimeout(t); t = setTimeout(save, 1500); };
+  document.addEventListener('input', e => { if (e.target.id !== 'pharmacySelect') later(); });
+  document.addEventListener('change', e => { if (e.target.id !== 'pharmacySelect') later(); });
+  new MutationObserver(later).observe(employeeListEl, { childList: true });
+  new MutationObserver(later).observe(templateListEl, { childList: true });
+})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -5464,8 +5486,17 @@ document.getElementById('saveLocalBtn').addEventListener('click', () => {
   if (row && row.data && row.data.pharmacies) mem['schemagenerator_pharmacies_v1'] = JSON.stringify(row.data);
 
   try {
-    const pr = await sb.from('profiles').select('id, name').order('name');
-    window.__genStaff = (pr.data || []).map(p => ({ name: p.name, pct: 100, category: 'recept', weekendPolicy: 'alla', weekendGroup: 1 }));
+    const pr = await sb.from('profiles').select('id, name, utbildning').order('name');
+    // Receptarie/apotekare -> Recept. Apotekstekniker/apoteksassistent -> Egenvård.
+    // Studenter och personer utan angiven utbildning tas inte med.
+    const kategoriFor = u => {
+      if (u === 'Farmacevt (apotekare)' || u === 'Farmacevt (receptarie)') return 'recept';
+      if (u === 'Apotekstekniker' || u === 'Apoteksassistent') return 'egenvard';
+      return null;
+    };
+    window.__genStaff = (pr.data || [])
+      .map(p => ({ name: p.name, pct: 100, category: kategoriFor(p.utbildning), weekendPolicy: 'alla', weekendGroup: 1 }))
+      .filter(s => s.category);
   } catch (e) { window.__genStaff = []; }
 
   // Ersätter webbläsarens lagring: allt läses/skrivs mot databasen (en rad).
