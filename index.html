@@ -1887,23 +1887,13 @@ async function showAdmin() {
 }
 
 /* ---- Medvind (chef): medarbetare kopplade till schemageneratorn ----
-   Inställningarna ligger i tabellen medvind_medarbetare. Vid varje öppning/ändring
-   skrivs en ögonblicksbild till localStorage (nyckel apotek_medvind_staff) som
-   schemagenerator.html (samma domän) läser, så medarbetarna finns att välja där. */
-const MEDVIND_STAFF_KEY = "apotek_medvind_staff";
+   Inställningarna ligger i tabellen medvind_medarbetare. schemagenerator.html (egen fil,
+   delar inloggning med appen) läser dem direkt från databasen och sparar sina egna
+   apotek i tabellen schemagenerator_data. */
 let medvindRader = [];
 
 function medvindStandard(profil) {
   return { user_id: profil.id, aktiv: true, grad: 100, kategori: "recept", helg: "alla", helggrupp: 1 };
-}
-
-function medvindSynkaTillGenerator(profiler) {
-  try {
-    const staff = profiler.map(p => ({ p, r: medvindRader.find(x => x.user_id === p.id) || medvindStandard(p) }))
-      .filter(({ r }) => r.aktiv)
-      .map(({ p, r }) => ({ name: p.name, pct: r.grad, category: r.kategori, weekendPolicy: r.helg, weekendGroup: r.helggrupp }));
-    window.localStorage.setItem(MEDVIND_STAFF_KEY, JSON.stringify({ updated: new Date().toISOString(), staff }));
-  } catch (e) {}
 }
 
 async function showMedvind() {
@@ -1917,7 +1907,6 @@ async function renderMedvind() {
   const container = document.getElementById("medvind-results");
   const [profiler, res] = await Promise.all([fetchProfiles(), sb.from("medvind_medarbetare").select("*")]);
   medvindRader = res.error ? [] : res.data;
-  medvindSynkaTillGenerator(profiler);
   const fel = res.error ? (/schema cache|does not exist/i.test(res.error.message) ? "Tabellen saknas — kör supabase-schema-add-medvind.sql i Supabase först." : res.error.message) : "";
   const opt = (v, cur, label) => `<option value="${v}" ${v === cur ? "selected" : ""}>${label}</option>`;
   container.innerHTML = `
@@ -1957,7 +1946,6 @@ async function sparaMedvind(userId, andring) {
   if (error) { alert("Kunde inte spara: " + error.message); return; }
   const i = medvindRader.findIndex(x => x.user_id === userId);
   if (i >= 0) medvindRader[i] = nu; else medvindRader.push(nu);
-  medvindSynkaTillGenerator(profiler);
   if ("aktiv" in andring) await renderMedvind();
 }
 
