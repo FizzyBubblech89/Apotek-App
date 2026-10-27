@@ -1919,14 +1919,18 @@ async function openOmrostningAdmin() {
 async function renderOmrostningAdmin() {
   const body = document.getElementById("omrostning-body");
   if (!body) return;
-  const [pr, sr, profiler] = await Promise.all([
+  const [pr, profiler] = await Promise.all([
     sb.from("polls").select("*").order("created_at", { ascending: false }),
-    sb.from("poll_svar").select("poll_id"),
     fetchProfiles(),
   ]);
+  const antalPer = {};
+  if (!pr.error) {
+    const rs = await Promise.all(pr.data.map(p => sb.rpc("poll_resultat", { p_id: p.id })));
+    pr.data.forEach((p, i) => { antalPer[p.id] = (rs[i].data && rs[i].data.antal) || 0; });
+  }
   const fel = pr.error ? (/schema cache|does not exist/i.test(pr.error.message) ? "Tabellen saknas — kör supabase-schema-add-omrostning.sql i Supabase först." : pr.error.message) : "";
   const lista = pr.error ? [] : pr.data;
-  const antalSvar = id => (sr.data || []).filter(x => x.poll_id === id).length;
+  const antalSvar = id => antalPer[id] || 0;
   body.innerHTML = `
     <button class="btn-primary" onclick="openNyOmrostning()">+ Ny omröstning</button>
     ${fel ? `<div style="color:#b3261e; font-size:12px; margin-top:8px;">${egEsc(fel)}</div>` : ""}
@@ -1940,7 +1944,7 @@ async function renderOmrostningAdmin() {
             <div style="font-weight:700; font-size:13.5px;">${egEsc(p.fraga)}</div>
             <span style="font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; background:${st.bg}; color:${st.fg}; white-space:nowrap;">${st.text}</span>
           </div>
-          <div style="font-size:11.5px; color:var(--muted); margin-top:3px;">${antalSvar(p.id)} av ${tot} har svarat · slutar ${pollFmt(p.slutar_at)}</div>
+          <div style="font-size:11.5px; color:var(--muted); margin-top:3px;">${antalSvar(p.id)} av ${tot} har svarat · ${p.anonym ? "🔒 anonym" : "ej anonym"} · slutar ${pollFmt(p.slutar_at)}</div>
         </div>`;
       }).join("") : `<div class="empty-state">Inga omröstningar ännu.</div>`}
     </div>
@@ -1950,7 +1954,7 @@ async function renderOmrostningAdmin() {
 
 function openNyOmrostning() {
   const slut = new Date(Date.now() + 3 * 86400000);
-  pollDraft = { fraga: "", alternativ: ["", ""], fritext: false, alla: true, mottagare: [], slutDatum: isoDate(slut), slutTid: "12:00", dagar: 7 };
+  pollDraft = { fraga: "", alternativ: ["", ""], fritext: false, anonym: true, alla: true, mottagare: [], slutDatum: isoDate(slut), slutTid: "12:00", dagar: 7 };
   document.getElementById("omrostning-ny-overlay")?.remove();
   const ov = document.createElement("div");
   ov.className = "kassa-modal-overlay";
@@ -1983,6 +1987,10 @@ async function renderNyOmrostningBody() {
     <label class="kassa-check-row" style="margin-bottom:10px;">
       <input type="checkbox" ${d.fritext ? "checked" : ""} onchange="pollDraft.fritext = this.checked">
       <span class="kassa-check-info"><span class="kassa-check-name">Tillåt fritextsvar</span><span class="kassa-check-id">Medarbetare kan skriva ett eget svar (som komplement eller istället för alternativen)</span></span>
+    </label>
+    <label class="kassa-check-row" style="margin-bottom:10px;">
+      <input type="checkbox" ${d.anonym ? "checked" : ""} onchange="pollDraft.anonym = this.checked">
+      <span class="kassa-check-info"><span class="kassa-check-name">Anonyma svar</span><span class="kassa-check-id">Av: alla deltagare kan se vem som svarat vad. På: ingen ser vad någon svarat, och det står i omröstningen.</span></span>
     </label>
     <div class="field-group">
       <label class="field-label">Skickas till</label>
@@ -2038,7 +2046,7 @@ async function sparaOmrostning() {
   const profiler = await fetchProfiles();
   const mottagare = d.alla ? null : d.mottagare;
   const { error } = await sb.from("polls").insert({
-    fraga, alternativ: alt, tillat_fritext: d.fritext, mottagare,
+    fraga, alternativ: alt, tillat_fritext: d.fritext, anonym: d.anonym, mottagare,
     slutar_at: slut.toISOString(), visa_resultat_dagar: d.dagar, created_by: getCurrentUser().id,
   });
   if (error) { err.textContent = "Kunde inte spara: " + error.message; return; }
@@ -2049,16 +2057,16 @@ async function sparaOmrostning() {
 }
 
 async function visaOmrostningDetalj(id) {
-  const [{ data: p }, { data: svar }, profiler, resRes] = await Promise.all([
+  const [{ data: p }, profiler, resRes, delRes] = await Promise.all([
     sb.from("polls").select("*").eq("id", id).single(),
-    sb.from("poll_svar").select("user_id").eq("poll_id", id),
     fetchProfiles(),
     sb.rpc("poll_resultat", { p_id: id }),
+    sb.rpc("poll_deltagare", { p_id: id }),
   ]);
   if (!p) return;
-  const res = resRes.data || { antal: 0, counts: [], fritext: [] };
+  const res = resRes.data || { antal: 0, counts: [], fritext: [], svar: [] };
   const mott = (p.mottagare ? profiler.filter(x => p.mottagare.includes(x.id)) : profiler);
-  const svarat = new Set((svar || []).map(x => x.user_id));
+  const svarat = new Set(delRes.data || []);
   const st = pollStatus(p);
   document.getElementById("omrostning-detalj-overlay")?.remove();
   const ov = document.createElement("div");
@@ -2067,11 +2075,13 @@ async function visaOmrostningDetalj(id) {
   ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
   ov.innerHTML = `<div class="kassa-modal-card" style="max-height:88vh; overflow-y:auto;">
     <div class="kassa-modal-title">${egEsc(p.fraga)}</div>
-    <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">${st.text} · slutar ${pollFmt(p.slutar_at)} · resultat visas ${p.visa_resultat_dagar} dagar efter</div>
-    ${pollResultatHtml(p, res)}
-    <div style="font-size:12px; margin-top:12px;"><b>Har svarat (${mott.filter(x => svarat.has(x.id)).length}):</b> ${egEsc(mott.filter(x => svarat.has(x.id)).map(x => x.name).join(", ") || "—")}</div>
+    <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">${st.text} · slutar ${pollFmt(p.slutar_at)} · resultat visas ${p.visa_resultat_dagar} dagar efter</div>
+    <div style="margin-bottom:8px;">${pollAnonymEtikett(p)}</div>
+    ${pollResultatHtml(p, res, null, false)}
+    ${p.anonym ? "" : `<div style="margin-top:10px;">${pollNamnPerAlt(p, res, profiler)}</div>`}
+    <div style="font-size:12px; margin-top:10px;"><b>Har svarat (${mott.filter(x => svarat.has(x.id)).length}):</b> ${egEsc(mott.filter(x => svarat.has(x.id)).map(x => x.name).join(", ") || "—")}</div>
     <div style="font-size:12px; margin-top:6px;"><b>Har inte svarat (${mott.filter(x => !svarat.has(x.id)).length}):</b> ${egEsc(mott.filter(x => !svarat.has(x.id)).map(x => x.name).join(", ") || "—")}</div>
-    <div style="font-size:11px; color:var(--muted); margin-top:6px;">Vem som röstat på vad visas inte — bara sammanställningen.</div>
+    ${p.anonym ? `<div style="font-size:11px; color:var(--muted); margin-top:6px;">Anonym omröstning: du ser vilka som svarat, men inte vad de svarat.</div>` : ""}
     ${new Date(p.slutar_at) > new Date() ? `<button class="btn-secondary" onclick="avslutaOmrostning('${p.id}')">Avsluta nu</button>` : ""}
     <button class="btn-secondary" style="color:#b3261e;" onclick="taBortOmrostning('${p.id}')">Ta bort omröstningen</button>
     <button class="btn-secondary" onclick="document.getElementById('omrostning-detalj-overlay').remove()">Stäng</button>
@@ -2094,30 +2104,73 @@ function taBortOmrostning(id) {
   });
 }
 
-function pollResultatHtml(p, res, mittVal) {
+function pollAnonymEtikett(p) {
+  return p.anonym
+    ? `<span style="font-size:10.5px; font-weight:800; color:#2c5aa0;">🔒 Anonym — ingen ser vad någon svarat</span>`
+    : `<span style="font-size:10.5px; font-weight:800; color:#b5590a;">👁 Ej anonym — namn och svar syns för deltagarna</span>`;
+}
+
+function pollResultatHtml(p, res, mittVal, klickbar) {
   const counts = res.counts || [];
   const alt = p.alternativ || [];
   const summa = counts.reduce((a, b) => a + b, 0);
   const max = Math.max(1, ...counts);
-  const kolumner = alt.map((a, i) => {
+  const rader = alt.map((a, i) => {
     const c = counts[i] || 0;
     const pct = summa ? Math.round((c / summa) * 100) : 0;
-    const hojd = Math.round((c / max) * 100);
+    const bredd = Math.round((c / max) * 100);
     const mitt = mittVal === i;
     return `
-      <div style="flex:1; min-width:46px; max-width:90px; display:flex; flex-direction:column; align-items:center;">
-        <div style="font-size:12px; font-weight:800;">${c}</div>
-        <div style="font-size:10.5px; color:var(--muted); margin-bottom:3px;">${pct}%</div>
-        <div style="height:110px; width:100%; display:flex; align-items:flex-end;">
-          <div style="width:100%; height:${Math.max(hojd, c ? 4 : 1)}%; background:linear-gradient(180deg, var(--green-600), var(--green-700)); border-radius:8px 8px 3px 3px; ${mitt ? "outline:2.5px solid #2c5aa0; outline-offset:1px;" : ""}"></div>
-        </div>
-        <div style="font-size:11px; font-weight:700; text-align:center; margin-top:5px; line-height:1.2; word-break:break-word;">${egEsc(a)}${mitt ? " ✓" : ""}</div>
+      <div style="display:flex; align-items:center; gap:6px; margin:2px 0; font-size:11px; line-height:1.2;">
+        <div style="flex:0 0 34%; max-width:34%; font-weight:${mitt ? 800 : 600}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${egEsc(a)}">${egEsc(a)}${mitt ? " ✓" : ""}</div>
+        <div style="flex:1; height:7px; background:var(--line); border-radius:999px; overflow:hidden;"><div style="height:100%; width:${bredd}%; background:linear-gradient(90deg, var(--green-600), var(--green-700));${mitt ? " box-shadow:0 0 0 1.5px #2c5aa0;" : ""}"></div></div>
+        <div style="flex:0 0 52px; text-align:right; font-weight:700; white-space:nowrap;">${c} · ${pct}%</div>
       </div>`;
   }).join("");
   const fri = (res.fritext || []);
-  return `<div style="display:flex; gap:8px; justify-content:center; align-items:flex-start; overflow-x:auto; padding:2px 0 4px;">${kolumner}</div>
-    <div style="font-size:11.5px; color:var(--muted); text-align:center; margin-top:6px;">${res.antal || 0} svar totalt</div>
-    ${fri.length ? `<div style="margin-top:8px; font-size:12px; font-weight:800;">Fritextsvar</div>${fri.slice(0, 20).map(t => `<div style="font-size:12.5px; padding:4px 8px; margin-top:4px; background:var(--green-050); border-radius:8px; white-space:pre-wrap;">${egEsc(t)}</div>`).join("")}` : ""}`;
+  const klick = klickbar && !p.anonym;
+  return `<div ${klick ? `onclick="visaPollSvarDetalj('${p.id}')" style="cursor:pointer;"` : ""}>
+      ${rader}
+      <div style="font-size:10.5px; color:var(--muted); margin-top:3px;">${res.antal || 0} svar${klick ? " · tryck för att se vem som svarat vad ›" : ""}</div>
+    </div>
+    ${p.anonym && fri.length ? `<div style="margin-top:5px; font-size:11px; font-weight:800;">Fritext</div>${fri.slice(0, 20).map(t => `<div style="font-size:11.5px; padding:3px 7px; margin-top:3px; background:var(--green-050); border-radius:7px; white-space:pre-wrap;">${egEsc(t)}</div>`).join("")}` : ""}`;
+}
+
+/* Detaljvy för ej anonyma omröstningar: vilka som svarat och vad. */
+function pollNamnPerAlt(p, res, profiler) {
+  const namn = uid => { const x = profiler.find(q => q.id === uid); return x ? x.name : "Okänd"; };
+  const svar = res.svar || [];
+  const per = (p.alternativ || []).map((a, i) => {
+    const vilka = svar.filter(x => x.val === i).map(x => namn(x.user_id));
+    return `<div style="margin-bottom:6px;"><div style="font-size:12.5px; font-weight:800;">${egEsc(a)} <span style="font-weight:600; color:var(--muted);">(${vilka.length})</span></div><div style="font-size:12px;">${vilka.length ? egEsc(vilka.join(", ")) : "—"}</div></div>`;
+  }).join("");
+  const fri = svar.filter(x => x.fritext);
+  return per + (fri.length ? `<div style="font-size:12.5px; font-weight:800; margin-top:6px;">Fritext</div>${fri.map(x => `<div style="font-size:12px; padding:4px 8px; margin-top:4px; background:var(--green-050); border-radius:8px;"><b>${egEsc(namn(x.user_id))}:</b> <span style="white-space:pre-wrap;">${egEsc(x.fritext)}</span></div>`).join("")}` : "");
+}
+
+async function visaPollSvarDetalj(id) {
+  const [{ data: p }, resRes, profiler] = await Promise.all([
+    sb.from("polls").select("*").eq("id", id).single(),
+    sb.rpc("poll_resultat", { p_id: id }),
+    fetchProfiles(),
+  ]);
+  const res = resRes.data;
+  if (!p || !res || p.anonym) return;
+  const mott = p.mottagare ? profiler.filter(x => p.mottagare.includes(x.id)) : profiler;
+  const svarat = new Set((res.svar || []).map(x => x.user_id));
+  document.getElementById("poll-svar-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "kassa-modal-overlay";
+  ov.id = "poll-svar-overlay";
+  ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="kassa-modal-card" style="max-height:85vh; overflow-y:auto;">
+    <div class="kassa-modal-title">${egEsc(p.fraga)}</div>
+    <div style="margin-bottom:8px;">${pollAnonymEtikett(p)}</div>
+    ${pollNamnPerAlt(p, res, profiler)}
+    <div style="font-size:12px; margin-top:10px;"><b>Har inte svarat (${mott.filter(x => !svarat.has(x.id)).length}):</b> ${egEsc(mott.filter(x => !svarat.has(x.id)).map(x => x.name).join(", ") || "—")}</div>
+    <button class="btn-secondary" style="margin-top:12px;" onclick="document.getElementById('poll-svar-overlay').remove()">Stäng</button>
+  </div>`;
+  document.body.appendChild(ov);
 }
 
 /* Omröstningar i notisfältet för den inloggade (pågående = rösta, avslutade = resultat en tid). */
@@ -2143,7 +2196,8 @@ async function hamtaOmrostningarHtml(user) {
           </label>`).join("");
         return `<div style="${ram}">
           ${rubrik(`🗳️ Omröstning · slutar ${pollFmt(p.slutar_at)}`)}
-          <div style="font-size:13.5px; font-weight:800; margin-bottom:4px;">${egEsc(p.fraga)}</div>
+          <div style="font-size:13.5px; font-weight:800; margin-bottom:2px;">${egEsc(p.fraga)}</div>
+          <div style="margin-bottom:4px;">${pollAnonymEtikett(p)}</div>
           ${alt}
           ${p.tillat_fritext ? `<input class="field-input" type="text" id="poll-text-${p.id}" placeholder="Eget svar eller kommentar…" value="${egEsc((mitt && mitt.fritext) || "")}" style="margin-top:6px; font-size:16px;">` : ""}
           <div id="poll-err-${p.id}" style="color:#b3261e; font-size:12px; font-weight:700;"></div>
@@ -2156,8 +2210,9 @@ async function hamtaOmrostningarHtml(user) {
         return `<div style="${ram}">
           ${rubrik(`🗳️ Omröstning · pågår till ${pollFmt(p.slutar_at)}`)}
           <div style="font-size:13.5px; font-weight:800;">${egEsc(p.fraga)}</div>
-          <div style="font-size:12.5px; margin: 4px 0 10px; color:var(--green-700); font-weight:700;">✓ Du har röstat${valt ? `: ${egEsc(valt)}` : ""}${mitt.fritext ? ` · "${egEsc(mitt.fritext)}"` : ""}</div>
-          ${live ? `<div style="font-size:11px; font-weight:800; color:var(--muted); text-align:center; margin-bottom:4px;">RESULTAT HITTILLS</div>${pollResultatHtml(p, live, mitt.val)}` : ""}
+          <div style="margin-top:2px;">${pollAnonymEtikett(p)}</div>
+          <div style="font-size:12.5px; margin: 4px 0 8px; color:var(--green-700); font-weight:700;">✓ Du har röstat${valt ? `: ${egEsc(valt)}` : ""}${mitt.fritext ? ` · "${egEsc(mitt.fritext)}"` : ""}</div>
+          ${live ? `<div style="font-size:10.5px; font-weight:800; color:var(--muted); margin-bottom:3px;">RESULTAT HITTILLS</div>${pollResultatHtml(p, live, mitt.val, true)}` : ""}
           <button class="btn-secondary" style="margin-top:8px; width:auto; padding:5px 12px; font-size:12px;" onclick="pollRedigerar.add('${p.id}'); renderTodayWidget(getCurrentUser());">Ändra svar</button>
         </div>`;
       }
@@ -2165,7 +2220,7 @@ async function hamtaOmrostningarHtml(user) {
       return `<div style="${ram}">
         ${rubrik("🗳️ Resultat av omröstning")}
         <div style="font-size:13.5px; font-weight:800; margin-bottom:6px;">${egEsc(p.fraga)}</div>
-        ${pollResultatHtml(p, res || { antal: 0, counts: [], fritext: [] }, mitt ? mitt.val : null)}
+        <div style="margin-bottom:5px;">${pollAnonymEtikett(p)}</div>${pollResultatHtml(p, res || { antal: 0, counts: [], fritext: [] }, mitt ? mitt.val : null, true)}
       </div>`;
     }));
     return delar.join("");
