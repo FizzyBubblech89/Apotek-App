@@ -1870,6 +1870,14 @@ async function showAdmin() {
         <div class="nav-label">Viktig information</div>
         <div class="nav-sub">Fäst överst på startsidan</div>
       </div>
+
+      <div class="nav-card" onclick="openOmrostningAdmin()">
+        <div class="nav-icon nav-icon-c2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="M8 16V12M12 16V8M16 16V10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </div>
+        <div class="nav-label">Omröstning</div>
+        <div class="nav-sub">Skapa och följ upp</div>
+      </div>
     </div>
   `;
 }
@@ -1879,6 +1887,293 @@ async function showAdmin() {
 function showMedvind() {
   if (!isChef()) return;
   window.location.href = "schemagenerator.html";
+}
+
+/* ---- Omröstningar (chef skapar under Admin, visas i notisfältet) ---- */
+let pollDraft = null;
+const pollRedigerar = new Set(); // omröstningar där den inloggade ändrar sitt svar
+
+function pollFmt(iso) {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("sv-SE", { day: "numeric", month: "short" })} kl ${d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}`;
+}
+function pollStatus(p) {
+  const nu = Date.now(), slut = new Date(p.slutar_at).getTime();
+  if (nu < slut) return { text: "Pågår", bg: "#e4f1ff", fg: "#1d5fa8" };
+  if (nu < slut + p.visa_resultat_dagar * 86400000) return { text: "Resultat visas", bg: "var(--green-100)", fg: "var(--green-700)" };
+  return { text: "Avslutad", bg: "var(--line)", fg: "var(--muted)" };
+}
+
+async function openOmrostningAdmin() {
+  if (!isChef()) return;
+  document.getElementById("omrostning-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "kassa-modal-overlay";
+  ov.id = "omrostning-overlay";
+  ov.onclick = (ev) => { if (ev.target === ov) { ov.remove(); renderTodayWidget(getCurrentUser(), true); } };
+  ov.innerHTML = `<div class="kassa-modal-card" style="max-height:85vh; overflow-y:auto;"><div class="kassa-modal-title">Omröstningar</div><div id="omrostning-body"></div></div>`;
+  document.body.appendChild(ov);
+  await renderOmrostningAdmin();
+}
+
+async function renderOmrostningAdmin() {
+  const body = document.getElementById("omrostning-body");
+  if (!body) return;
+  const [pr, sr, profiler] = await Promise.all([
+    sb.from("polls").select("*").order("created_at", { ascending: false }),
+    sb.from("poll_svar").select("poll_id"),
+    fetchProfiles(),
+  ]);
+  const fel = pr.error ? (/schema cache|does not exist/i.test(pr.error.message) ? "Tabellen saknas — kör supabase-schema-add-omrostning.sql i Supabase först." : pr.error.message) : "";
+  const lista = pr.error ? [] : pr.data;
+  const antalSvar = id => (sr.data || []).filter(x => x.poll_id === id).length;
+  body.innerHTML = `
+    <button class="btn-primary" onclick="openNyOmrostning()">+ Ny omröstning</button>
+    ${fel ? `<div style="color:#b3261e; font-size:12px; margin-top:8px;">${egEsc(fel)}</div>` : ""}
+    <div style="margin-top:14px;">
+      ${lista.length ? lista.map(p => {
+        const st = pollStatus(p);
+        const tot = p.mottagare ? p.mottagare.length : profiler.length;
+        return `
+        <div onclick="visaOmrostningDetalj('${p.id}')" style="cursor:pointer; border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
+            <div style="font-weight:700; font-size:13.5px;">${egEsc(p.fraga)}</div>
+            <span style="font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; background:${st.bg}; color:${st.fg}; white-space:nowrap;">${st.text}</span>
+          </div>
+          <div style="font-size:11.5px; color:var(--muted); margin-top:3px;">${antalSvar(p.id)} av ${tot} har svarat · slutar ${pollFmt(p.slutar_at)}</div>
+        </div>`;
+      }).join("") : `<div class="empty-state">Inga omröstningar ännu.</div>`}
+    </div>
+    <button class="btn-secondary" onclick="document.getElementById('omrostning-overlay').remove(); renderTodayWidget(getCurrentUser(), true);">Stäng</button>
+  `;
+}
+
+function openNyOmrostning() {
+  const slut = new Date(Date.now() + 3 * 86400000);
+  pollDraft = { fraga: "", alternativ: ["", ""], fritext: false, alla: true, mottagare: [], slutDatum: isoDate(slut), slutTid: "12:00", dagar: 7 };
+  document.getElementById("omrostning-ny-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "kassa-modal-overlay";
+  ov.id = "omrostning-ny-overlay";
+  ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="kassa-modal-card" style="max-height:88vh; overflow-y:auto;"><div class="kassa-modal-title">Ny omröstning</div><div id="omrostning-ny-body"></div></div>`;
+  document.body.appendChild(ov);
+  renderNyOmrostningBody();
+}
+
+async function renderNyOmrostningBody() {
+  const d = pollDraft;
+  const profiler = await fetchProfiles();
+  const wrap = document.getElementById("omrostning-ny-body");
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <div class="field-group">
+      <label class="field-label">Fråga</label>
+      <textarea class="field-input" rows="2" placeholder="T.ex. Vilken dag passar bäst för personalmötet?" oninput="pollDraft.fraga = this.value">${egEsc(d.fraga)}</textarea>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Alternativ</label>
+      ${d.alternativ.map((a, i) => `
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+          <input class="field-input" type="text" value="${egEsc(a)}" placeholder="Alternativ ${i + 1}" oninput="pollDraft.alternativ[${i}] = this.value">
+          ${d.alternativ.length > 1 ? `<button class="btn-secondary" style="width:auto; margin:0; padding:0 12px;" onclick="pollTaBortAlt(${i})">✕</button>` : ""}
+        </div>`).join("")}
+      <button class="btn-secondary" style="margin-top:2px;" onclick="pollLaggTillAlt()">+ Lägg till alternativ</button>
+    </div>
+    <label class="kassa-check-row" style="margin-bottom:10px;">
+      <input type="checkbox" ${d.fritext ? "checked" : ""} onchange="pollDraft.fritext = this.checked">
+      <span class="kassa-check-info"><span class="kassa-check-name">Tillåt fritextsvar</span><span class="kassa-check-id">Medarbetare kan skriva ett eget svar (som komplement eller istället för alternativen)</span></span>
+    </label>
+    <div class="field-group">
+      <label class="field-label">Skickas till</label>
+      <label class="kassa-check-row" style="margin-bottom:4px;">
+        <input type="checkbox" ${d.alla ? "checked" : ""} onchange="pollDraft.alla = this.checked; renderNyOmrostningBody()">
+        <span class="kassa-check-info"><span class="kassa-check-name">Alla</span></span>
+      </label>
+      ${d.alla ? "" : `<div style="max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:12px; padding:4px 8px;">
+        ${profiler.map(p => `
+          <label class="kassa-check-row">
+            <input type="checkbox" ${d.mottagare.includes(p.id) ? "checked" : ""} onchange="pollVaxlaMottagare('${p.id}', this.checked)">
+            <span class="kassa-check-info"><span class="kassa-check-name">${egEsc(p.name)}</span></span>
+          </label>`).join("")}
+      </div>`}
+    </div>
+    <div class="field-group">
+      <label class="field-label">Omröstningen pågår till</label>
+      <div style="display:flex; gap:8px;">
+        <input class="field-input" type="date" value="${d.slutDatum}" onchange="pollDraft.slutDatum = this.value">
+        <input class="field-input" type="time" value="${d.slutTid}" style="max-width:120px;" onchange="pollDraft.slutTid = this.value">
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Visa resultatet i (dagar efter att den är klar)</label>
+      <input class="field-input" type="number" min="0" max="90" value="${d.dagar}" onchange="pollDraft.dagar = Math.max(0, Math.min(90, parseInt(this.value, 10) || 0))">
+    </div>
+    <div id="omrostning-ny-err" style="color:#b3261e; font-size:12.5px; font-weight:700; min-height:16px;"></div>
+    <button class="btn-primary" onclick="sparaOmrostning()">Skapa och skicka</button>
+    <button class="btn-secondary" onclick="document.getElementById('omrostning-ny-overlay').remove()">Avbryt</button>
+  `;
+}
+
+function pollLaggTillAlt() { pollDraft.alternativ.push(""); renderNyOmrostningBody(); }
+function pollTaBortAlt(i) { pollDraft.alternativ.splice(i, 1); renderNyOmrostningBody(); }
+function pollVaxlaMottagare(id, på) {
+  const s = new Set(pollDraft.mottagare);
+  if (på) s.add(id); else s.delete(id);
+  pollDraft.mottagare = [...s];
+}
+
+async function sparaOmrostning() {
+  const d = pollDraft;
+  const err = document.getElementById("omrostning-ny-err");
+  const fraga = d.fraga.trim();
+  const alt = d.alternativ.map(a => a.trim()).filter(Boolean);
+  if (!fraga) { err.textContent = "Skriv en fråga."; return; }
+  if (alt.length < 2 && !(d.fritext && alt.length === 0)) { err.textContent = "Lägg till minst två alternativ (eller bara fritext)."; return; }
+  if (!d.alla && !d.mottagare.length) { err.textContent = "Välj minst en mottagare."; return; }
+  if (!d.slutDatum) { err.textContent = "Välj när omröstningen slutar."; return; }
+  const slut = new Date(`${d.slutDatum}T${d.slutTid || "12:00"}`);
+  if (isNaN(slut) || slut.getTime() <= Date.now()) { err.textContent = "Sluttiden måste vara i framtiden."; return; }
+  err.textContent = "Sparar…";
+  const profiler = await fetchProfiles();
+  const mottagare = d.alla ? null : d.mottagare;
+  const { error } = await sb.from("polls").insert({
+    fraga, alternativ: alt, tillat_fritext: d.fritext, mottagare,
+    slutar_at: slut.toISOString(), visa_resultat_dagar: d.dagar, created_by: getCurrentUser().id,
+  });
+  if (error) { err.textContent = "Kunde inte spara: " + error.message; return; }
+  const me = getCurrentUser().id;
+  sendPushToUsers((mottagare || profiler.map(p => p.id)).filter(id => id !== me), "Ny omröstning", fraga, "./");
+  document.getElementById("omrostning-ny-overlay").remove();
+  await renderOmrostningAdmin();
+}
+
+async function visaOmrostningDetalj(id) {
+  const [{ data: p }, { data: svar }, profiler, resRes] = await Promise.all([
+    sb.from("polls").select("*").eq("id", id).single(),
+    sb.from("poll_svar").select("user_id").eq("poll_id", id),
+    fetchProfiles(),
+    sb.rpc("poll_resultat", { p_id: id }),
+  ]);
+  if (!p) return;
+  const res = resRes.data || { antal: 0, counts: [], fritext: [] };
+  const mott = (p.mottagare ? profiler.filter(x => p.mottagare.includes(x.id)) : profiler);
+  const svarat = new Set((svar || []).map(x => x.user_id));
+  const st = pollStatus(p);
+  document.getElementById("omrostning-detalj-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "kassa-modal-overlay";
+  ov.id = "omrostning-detalj-overlay";
+  ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="kassa-modal-card" style="max-height:88vh; overflow-y:auto;">
+    <div class="kassa-modal-title">${egEsc(p.fraga)}</div>
+    <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">${st.text} · slutar ${pollFmt(p.slutar_at)} · resultat visas ${p.visa_resultat_dagar} dagar efter</div>
+    ${pollResultatHtml(p, res)}
+    <div style="font-size:12px; margin-top:12px;"><b>Har svarat (${mott.filter(x => svarat.has(x.id)).length}):</b> ${egEsc(mott.filter(x => svarat.has(x.id)).map(x => x.name).join(", ") || "—")}</div>
+    <div style="font-size:12px; margin-top:6px;"><b>Har inte svarat (${mott.filter(x => !svarat.has(x.id)).length}):</b> ${egEsc(mott.filter(x => !svarat.has(x.id)).map(x => x.name).join(", ") || "—")}</div>
+    <div style="font-size:11px; color:var(--muted); margin-top:6px;">Vem som röstat på vad visas inte — bara sammanställningen.</div>
+    ${new Date(p.slutar_at) > new Date() ? `<button class="btn-secondary" onclick="avslutaOmrostning('${p.id}')">Avsluta nu</button>` : ""}
+    <button class="btn-secondary" style="color:#b3261e;" onclick="taBortOmrostning('${p.id}')">Ta bort omröstningen</button>
+    <button class="btn-secondary" onclick="document.getElementById('omrostning-detalj-overlay').remove()">Stäng</button>
+  </div>`;
+  document.body.appendChild(ov);
+}
+
+async function avslutaOmrostning(id) {
+  const { error } = await sb.from("polls").update({ slutar_at: new Date().toISOString() }).eq("id", id);
+  if (error) { alert("Kunde inte avsluta: " + error.message); return; }
+  document.getElementById("omrostning-detalj-overlay")?.remove();
+  await renderOmrostningAdmin();
+}
+function taBortOmrostning(id) {
+  confirmDelete("Ta bort omröstning?", "Omröstningen och alla svar tas bort permanent. Det går inte att ångra.", async () => {
+    const { error } = await sb.from("polls").delete().eq("id", id);
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    document.getElementById("omrostning-detalj-overlay")?.remove();
+    await renderOmrostningAdmin();
+  });
+}
+
+function pollResultatHtml(p, res) {
+  const counts = res.counts || [];
+  const summa = counts.reduce((a, b) => a + b, 0);
+  const bars = (p.alternativ || []).map((a, i) => {
+    const c = counts[i] || 0;
+    const pct = summa ? Math.round((c / summa) * 100) : 0;
+    return `<div style="margin-bottom:7px;">
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; font-weight:700;"><span>${egEsc(a)}</span><span>${c} (${pct}%)</span></div>
+      <div style="height:8px; background:var(--line); border-radius:999px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:linear-gradient(90deg, var(--green-600), var(--green-700));"></div></div>
+    </div>`;
+  }).join("");
+  const fri = (res.fritext || []);
+  return `${bars}
+    <div style="font-size:11.5px; color:var(--muted);">${res.antal || 0} svar totalt</div>
+    ${fri.length ? `<div style="margin-top:8px; font-size:12px; font-weight:800;">Fritextsvar</div>${fri.slice(0, 20).map(t => `<div style="font-size:12.5px; padding:4px 8px; margin-top:4px; background:var(--green-050); border-radius:8px; white-space:pre-wrap;">${egEsc(t)}</div>`).join("")}` : ""}`;
+}
+
+/* Omröstningar i notisfältet för den inloggade (pågående = rösta, avslutade = resultat en tid). */
+async function hamtaOmrostningarHtml(user) {
+  try {
+    const nu = Date.now();
+    const [pr, sr] = await Promise.all([
+      sb.from("polls").select("*").gt("slutar_at", new Date(nu - 100 * 86400000).toISOString()).order("slutar_at", { ascending: true }),
+      sb.from("poll_svar").select("poll_id, val, fritext").eq("user_id", user.id),
+    ]);
+    if (pr.error || !pr.data) return "";
+    const mina = new Map((sr.data || []).map(x => [x.poll_id, x]));
+    const synliga = pr.data.filter(p => (p.mottagare === null || p.mottagare.includes(user.id)) && nu < new Date(p.slutar_at).getTime() + p.visa_resultat_dagar * 86400000);
+    const delar = await Promise.all(synliga.map(async p => {
+      const aktiv = nu < new Date(p.slutar_at).getTime();
+      const mitt = mina.get(p.id);
+      const ram = "background:#eef4ff; border:1.5px solid #6b8fd6; border-radius:12px; padding:10px 12px; margin-bottom:8px;";
+      const rubrik = (t) => `<div style="font-size:11px; font-weight:800; color:#2c5aa0; letter-spacing:.04em; text-transform:uppercase; margin-bottom:3px;">${t}</div>`;
+      if (aktiv && (!mitt || pollRedigerar.has(p.id))) {
+        const alt = (p.alternativ || []).map((a, i) => `
+          <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13px; font-weight:600;">
+            <input type="radio" name="poll-${p.id}" value="${i}" ${mitt && mitt.val === i ? "checked" : ""}> ${egEsc(a)}
+          </label>`).join("");
+        return `<div style="${ram}">
+          ${rubrik(`🗳️ Omröstning · slutar ${pollFmt(p.slutar_at)}`)}
+          <div style="font-size:13.5px; font-weight:800; margin-bottom:4px;">${egEsc(p.fraga)}</div>
+          ${alt}
+          ${p.tillat_fritext ? `<input class="field-input" type="text" id="poll-text-${p.id}" placeholder="Eget svar eller kommentar…" value="${egEsc((mitt && mitt.fritext) || "")}" style="margin-top:6px; font-size:16px;">` : ""}
+          <div id="poll-err-${p.id}" style="color:#b3261e; font-size:12px; font-weight:700;"></div>
+          <button class="btn-primary" style="margin-top:8px;" onclick="skickaPollSvar('${p.id}')">${mitt ? "Spara nytt svar" : "Rösta"}</button>
+        </div>`;
+      }
+      if (aktiv) {
+        const valt = mitt.val !== null && mitt.val !== undefined ? (p.alternativ || [])[mitt.val] : null;
+        return `<div style="${ram}">
+          ${rubrik(`🗳️ Omröstning · slutar ${pollFmt(p.slutar_at)}`)}
+          <div style="font-size:13px; font-weight:800;">${egEsc(p.fraga)}</div>
+          <div style="font-size:12.5px; margin-top:4px; color:var(--green-700); font-weight:700;">✓ Du har röstat${valt ? `: ${egEsc(valt)}` : ""}${mitt.fritext ? ` · "${egEsc(mitt.fritext)}"` : ""}</div>
+          <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">Resultatet visas när omröstningen är klar.</div>
+          <button class="btn-secondary" style="margin-top:6px; width:auto; padding:5px 12px; font-size:12px;" onclick="pollRedigerar.add('${p.id}'); renderTodayWidget(getCurrentUser());">Ändra svar</button>
+        </div>`;
+      }
+      const { data: res } = await sb.rpc("poll_resultat", { p_id: p.id });
+      return `<div style="${ram}">
+        ${rubrik("🗳️ Resultat av omröstning")}
+        <div style="font-size:13.5px; font-weight:800; margin-bottom:6px;">${egEsc(p.fraga)}</div>
+        ${pollResultatHtml(p, res || { antal: 0, counts: [], fritext: [] })}
+      </div>`;
+    }));
+    return delar.join("");
+  } catch (e) { return ""; }
+}
+
+async function skickaPollSvar(id) {
+  const err = document.getElementById(`poll-err-${id}`);
+  const checked = document.querySelector(`input[name="poll-${id}"]:checked`);
+  const textEl = document.getElementById(`poll-text-${id}`);
+  const fritext = textEl ? textEl.value.trim() : "";
+  const val = checked ? parseInt(checked.value, 10) : null;
+  if (val === null && !fritext) { if (err) err.textContent = "Välj ett alternativ eller skriv ett svar."; return; }
+  const user = getCurrentUser();
+  const { error } = await sb.from("poll_svar").upsert({ poll_id: id, user_id: user.id, val, fritext: fritext || null }, { onConflict: "poll_id,user_id" });
+  if (error) { if (err) err.textContent = /row-level security/i.test(error.message) ? "Omröstningen är avslutad." : "Kunde inte spara: " + error.message; return; }
+  pollRedigerar.delete(id);
+  await renderTodayWidget(user);
 }
 
 /* ---- Viktig information (fäst överst på startsidan) ---- */
@@ -13447,8 +13742,12 @@ function openFramtidaHandelser() {
 async function renderTodayWidget(user, tyst) {
   const wrap = document.getElementById("today-widget");
   if (!wrap) return;
+  // Pågår en röstning (valt alternativ / skriven text) hoppar bakgrundsuppdateringen över omritningen.
+  if (tyst && wrap.querySelector('input[name^="poll-"]:checked, input[id^="poll-text-"]:focus')) return;
   // Vid bakgrundsuppdatering (tyst) rensas inget — gamla innehållet står kvar tills det nya är klart.
   if (!tyst || !wrap.innerHTML.trim()) wrap.innerHTML = `<div class="today-card"><div class="today-date">Laddar…</div></div>`;
+  // Pågående omröstningar hämtas parallellt med resten.
+  const pollP = hamtaOmrostningarHtml(user);
   const viktigP = sb.from("viktig_info").select("*").order("created_at", { ascending: true }).then(r => r, () => ({ data: null, error: true }));
 
   const todayIso = isoDate(new Date());
@@ -13736,6 +14035,8 @@ async function renderTodayWidget(user, tyst) {
   lastHomeNoticeBlocks = noticeBlocks;
   const showCollapsed = noticeBlocks.length > 5;
   let viktigInfoHtml = "";
+  let pollHtml = "";
+  try { pollHtml = await pollP; } catch (e) {}
   try {
     const { data: vi, error: viErr } = await viktigP;
     if (!viErr && vi && vi.length) {
@@ -13749,7 +14050,7 @@ async function renderTodayWidget(user, tyst) {
 
   wrap.innerHTML = `
     <div class="today-card">
-      ${viktigInfoHtml}
+      ${viktigInfoHtml}${pollHtml}
       ${dagStjarna.length || veckaStjarna.length ? `
         <div style="background:linear-gradient(135deg, #fff8e1, #fff0c2); border:1px solid #f0d878; border-radius:12px; padding:8px 10px; margin-bottom:8px;">
           ${dagStjarna.length ? stjarnaGruppHtml(dagStjarna, "Dagens stjärna", allProfilesForToday) : ""}
