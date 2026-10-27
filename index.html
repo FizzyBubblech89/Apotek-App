@@ -2189,20 +2189,29 @@ async function hamtaOmrostningarHtml(user) {
     if (pr.error || !pr.data) return "";
     const mina = new Map((sr.data || []).map(x => [x.poll_id, x]));
     const synliga = pr.data.filter(p => (p.mottagare === null || p.mottagare.includes(user.id)) && nu < new Date(p.slutar_at).getTime() + p.visa_resultat_dagar * 86400000);
-    return synliga.map(p => {
+    return (await Promise.all(synliga.map(async p => {
       const aktiv = nu < new Date(p.slutar_at).getTime();
       const mitt = mina.get(p.id) || null;
       pollCache[p.id] = { p, mitt };
       const chip = aktiv
         ? (mitt ? `<span style="font-size:11px; font-weight:800; color:var(--green-700); white-space:nowrap;">✓ Röstat</span>`
                 : `<span style="font-size:11px; font-weight:800; color:#fff; background:#2c5aa0; padding:2px 10px; border-radius:999px; white-space:nowrap;">Rösta</span>`)
-        : `<span style="font-size:11px; font-weight:800; color:#2c5aa0; white-space:nowrap;">Resultat ›</span>`;
-      return `<div onclick="openPollModal('${p.id}')" style="cursor:pointer; display:flex; align-items:center; gap:8px; background:#eef4ff; border:1px solid #b9cdee; border-radius:10px; padding:7px 10px; margin-bottom:6px;">
-        <span style="font-size:14px;">🗳️</span>
-        <span style="flex:1; min-width:0; font-size:12.5px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${egEsc(p.fraga)}</span>
-        ${chip}
+        : `<span style="font-size:11px; font-weight:800; color:#2c5aa0; white-space:nowrap;">Avslutad</span>`;
+      // Resultatet visas direkt på kortet när man röstat eller omröstningen är slut.
+      let diagram = "";
+      if (mitt || !aktiv) {
+        const { data: res } = await sb.rpc("poll_resultat", { p_id: p.id });
+        if (res) diagram = `<div style="margin-top:7px;">${pollResultatHtml(p, res, mitt ? mitt.val : null)}<div style="font-size:10.5px; color:var(--muted); margin-top:2px;">${res.antal || 0} svar</div></div>`;
+      }
+      return `<div onclick="openPollModal('${p.id}')" style="cursor:pointer; background:#eef4ff; border:1px solid #b9cdee; border-radius:10px; padding:8px 10px; margin-bottom:6px;">
+        <div style="display:flex; align-items:flex-start; gap:8px;">
+          <span style="font-size:14px; line-height:1.3;">🗳️</span>
+          <span style="flex:1; min-width:0; font-size:12.5px; font-weight:700; line-height:1.35; white-space:pre-wrap; word-break:break-word;">${egEsc(p.fraga)}</span>
+          ${chip}
+        </div>
+        ${diagram}
       </div>`;
-    }).join("");
+    }))).join("");
   } catch (e) { return ""; }
 }
 
