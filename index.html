@@ -184,6 +184,15 @@
 
   /* ---- Home grid ---- */
   .home-content { padding: 24px 20px 40px; flex: 1; }
+  /* Startsidans sektioner (Drift, Försäljning, Lager …) — varje sektion har egen färg via --sec-rgb */
+  .home-sections { margin-top: 4px; }
+  .home-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .home-section:first-child { margin-top: 6px; padding-top: 0; border-top: none; }
+  .home-sec-title { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; color: rgb(var(--sec-rgb)); margin: 0 0 10px 2px; font-family: var(--font-display); }
+  .home-sec-title::before { content: ""; width: 3px; height: 13px; border-radius: 2px; background: rgb(var(--sec-rgb)); }
+  .home-section .nav-icon { background: linear-gradient(150deg, rgba(var(--sec-rgb), 0.72), rgb(var(--sec-rgb))) !important; color: #fff !important; box-shadow: 0 6px 16px -2px rgba(var(--sec-rgb), 0.45) !important; }
+  .home-section .nav-card::before { background: rgba(var(--sec-rgb), 0.85); }
+  .btn-grid > div:empty { display: none; }
   .section-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; margin: 0 0 12px 2px; font-family: var(--font-display); }
 
   /* ---- Today widget (home screen) ---- */
@@ -539,8 +548,10 @@
     </div>
     <div class="home-content">
       <div id="today-widget"></div>
-      <p class="section-label">Genvägar</p>
-      <div class="btn-grid">
+    <div class="home-sections">
+      <div class="home-section" style="--sec-rgb:13,148,136;">
+        <div class="home-sec-title">Drift</div>
+        <div class="btn-grid">
         <div class="nav-card" onclick="showSchema()">
           <div class="nav-icon nav-icon-c2">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="M3 10H21" stroke="currentColor" stroke-width="1.7"/><path d="M8 3V7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3V7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
@@ -548,42 +559,6 @@
           <div class="nav-label">Schema</div>
           <div class="nav-sub">Se dina pass</div>
         </div>
-
-        <div id="nav-card-kassa"></div>
-
-        <div id="nav-card-ideas"></div>
-
-        <div class="nav-card" onclick="showTraning()">
-          <div class="nav-icon nav-icon-c3">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M8 21H16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M12 17V21" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M6 4H18V10C18 13.3 15.3 16 12 16C8.7 16 6 13.3 6 10V4Z" stroke="currentColor" stroke-width="1.7"/><path d="M6 5H3.5C3.5 7.5 4.5 9 6 9.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18 5H20.5C20.5 7.5 19.5 9 18 9.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-          </div>
-          <div class="nav-label">Träning</div>
-          <div class="nav-sub">Säljtävlingar</div>
-        </div>
-
-        <div id="nav-card-tasks"></div>
-
-        <div id="nav-card-reklamation"></div>
-
-        <div id="nav-card-inkop"></div>
-
-        <div id="nav-card-snabblankar"></div>
-
-        <div id="nav-card-kampanj"></div>
-
-        <div id="nav-card-lager"></div>
-
-        <div id="nav-card-kvalitet"></div>
-
-        <div id="nav-card-kundmote"></div>
-
-        <div id="nav-card-moten"></div>
-
-        <div id="nav-card-personliga-moten"></div>
-
-        <div id="nav-card-utbildningar"></div>
-
-        <div id="nav-card-users"></div>
 
         <div id="nav-card-medvind"></div>
 
@@ -594,7 +569,65 @@
           <div class="nav-label">Frånvaro</div>
           <div class="nav-sub">Sjukanmälan</div>
         </div>
+        </div>
       </div>
+      <div class="home-section" style="--sec-rgb:217,119,6;">
+        <div class="home-sec-title">Försäljning</div>
+        <div class="btn-grid">
+        <div id="nav-card-kampanj"></div>
+
+        <div class="nav-card" onclick="showTraning()">
+          <div class="nav-icon nav-icon-c3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M8 21H16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M12 17V21" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M6 4H18V10C18 13.3 15.3 16 12 16C8.7 16 6 13.3 6 10V4Z" stroke="currentColor" stroke-width="1.7"/><path d="M6 5H3.5C3.5 7.5 4.5 9 6 9.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18 5H20.5C20.5 7.5 19.5 9 18 9.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </div>
+          <div class="nav-label">Säljträning</div>
+          <div class="nav-sub">Säljtävlingar</div>
+        </div>
+
+        <div id="nav-card-kundmote"></div>
+        </div>
+      </div>
+      <div class="home-section" style="--sec-rgb:37,99,235;">
+        <div class="home-sec-title">Lager</div>
+        <div class="btn-grid">
+        <div id="nav-card-lager"></div>
+
+        <div id="nav-card-reklamation"></div>
+        </div>
+      </div>
+      <div class="home-section" style="--sec-rgb:124,58,237;">
+        <div class="home-sec-title">Kvalité</div>
+        <div class="btn-grid">
+        <div id="nav-card-kvalitet"></div>
+
+        <div id="nav-card-utbildningar"></div>
+        </div>
+      </div>
+      <div class="home-section" style="--sec-rgb:219,39,119;">
+        <div class="home-sec-title">Hjärtats arbetssätt</div>
+        <div class="btn-grid">
+        <div id="nav-card-kassa"></div>
+
+        <div id="nav-card-moten"></div>
+
+        <div id="nav-card-personliga-moten"></div>
+
+        <div id="nav-card-tasks"></div>
+
+        <div id="nav-card-inkop"></div>
+
+        <div id="nav-card-ideas"></div>
+        </div>
+      </div>
+      <div class="home-section" style="--sec-rgb:100,116,139;">
+        <div class="home-sec-title">Övrigt</div>
+        <div class="btn-grid">
+        <div id="nav-card-snabblankar"></div>
+
+        <div id="nav-card-users"></div>
+        </div>
+      </div>
+    </div>
     </div>
   </div>
 
@@ -766,7 +799,7 @@
       <button class="back-btn" onclick="showHome()">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5L8 12L15 19" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <div class="title">Träning</div>
+      <div class="title">Säljträning</div>
     </div>
     <div class="schema-content">
       <div class="view-toggle">
@@ -1891,7 +1924,6 @@ function showMedvind() {
 
 /* ---- Omröstningar (chef skapar under Admin, visas i notisfältet) ---- */
 let pollDraft = null;
-const pollRedigerar = new Set(); // omröstningar där den inloggade ändrar sitt svar
 
 function pollFmt(iso) {
   const d = new Date(iso);
@@ -2110,7 +2142,7 @@ function pollAnonymEtikett(p) {
     : `<span style="font-size:10.5px; font-weight:800; color:#b5590a;">👁 Ej anonym — namn och svar syns för deltagarna</span>`;
 }
 
-function pollResultatHtml(p, res, mittVal, klickbar) {
+function pollResultatHtml(p, res, mittVal) {
   const counts = res.counts || [];
   const alt = p.alternativ || [];
   const summa = counts.reduce((a, b) => a + b, 0);
@@ -2128,11 +2160,7 @@ function pollResultatHtml(p, res, mittVal, klickbar) {
       </div>`;
   }).join("");
   const fri = (res.fritext || []);
-  const klick = klickbar && !p.anonym;
-  return `<div ${klick ? `onclick="visaPollSvarDetalj('${p.id}')" style="cursor:pointer;"` : ""}>
-      ${rader}
-      <div style="font-size:10.5px; color:var(--muted); margin-top:3px;">${res.antal || 0} svar${klick ? " · tryck för att se vem som svarat vad ›" : ""}</div>
-    </div>
+  return `<div>${rader}</div>
     ${p.anonym && fri.length ? `<div style="margin-top:5px; font-size:11px; font-weight:800;">Fritext</div>${fri.slice(0, 20).map(t => `<div style="font-size:11.5px; padding:3px 7px; margin-top:3px; background:var(--green-050); border-radius:7px; white-space:pre-wrap;">${egEsc(t)}</div>`).join("")}` : ""}`;
 }
 
@@ -2148,32 +2176,9 @@ function pollNamnPerAlt(p, res, profiler) {
   return per + (fri.length ? `<div style="font-size:12.5px; font-weight:800; margin-top:6px;">Fritext</div>${fri.map(x => `<div style="font-size:12px; padding:4px 8px; margin-top:4px; background:var(--green-050); border-radius:8px;"><b>${egEsc(namn(x.user_id))}:</b> <span style="white-space:pre-wrap;">${egEsc(x.fritext)}</span></div>`).join("")}` : "");
 }
 
-async function visaPollSvarDetalj(id) {
-  const [{ data: p }, resRes, profiler] = await Promise.all([
-    sb.from("polls").select("*").eq("id", id).single(),
-    sb.rpc("poll_resultat", { p_id: id }),
-    fetchProfiles(),
-  ]);
-  const res = resRes.data;
-  if (!p || !res || p.anonym) return;
-  const mott = p.mottagare ? profiler.filter(x => p.mottagare.includes(x.id)) : profiler;
-  const svarat = new Set((res.svar || []).map(x => x.user_id));
-  document.getElementById("poll-svar-overlay")?.remove();
-  const ov = document.createElement("div");
-  ov.className = "kassa-modal-overlay";
-  ov.id = "poll-svar-overlay";
-  ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
-  ov.innerHTML = `<div class="kassa-modal-card" style="max-height:85vh; overflow-y:auto;">
-    <div class="kassa-modal-title">${egEsc(p.fraga)}</div>
-    <div style="margin-bottom:8px;">${pollAnonymEtikett(p)}</div>
-    ${pollNamnPerAlt(p, res, profiler)}
-    <div style="font-size:12px; margin-top:10px;"><b>Har inte svarat (${mott.filter(x => !svarat.has(x.id)).length}):</b> ${egEsc(mott.filter(x => !svarat.has(x.id)).map(x => x.name).join(", ") || "—")}</div>
-    <button class="btn-secondary" style="margin-top:12px;" onclick="document.getElementById('poll-svar-overlay').remove()">Stäng</button>
-  </div>`;
-  document.body.appendChild(ov);
-}
+/* Omröstningar i notisfältet: en kompakt rad per omröstning. All information ligger i popupen. */
+const pollCache = {}; // id -> { p, mitt }
 
-/* Omröstningar i notisfältet för den inloggade (pågående = rösta, avslutade = resultat en tid). */
 async function hamtaOmrostningarHtml(user) {
   try {
     const nu = Date.now();
@@ -2184,47 +2189,82 @@ async function hamtaOmrostningarHtml(user) {
     if (pr.error || !pr.data) return "";
     const mina = new Map((sr.data || []).map(x => [x.poll_id, x]));
     const synliga = pr.data.filter(p => (p.mottagare === null || p.mottagare.includes(user.id)) && nu < new Date(p.slutar_at).getTime() + p.visa_resultat_dagar * 86400000);
-    const delar = await Promise.all(synliga.map(async p => {
+    return synliga.map(p => {
       const aktiv = nu < new Date(p.slutar_at).getTime();
-      const mitt = mina.get(p.id);
-      const ram = "background:#eef4ff; border:1.5px solid #6b8fd6; border-radius:12px; padding:10px 12px; margin-bottom:8px;";
-      const rubrik = (t) => `<div style="font-size:11px; font-weight:800; color:#2c5aa0; letter-spacing:.04em; text-transform:uppercase; margin-bottom:3px;">${t}</div>`;
-      if (aktiv && (!mitt || pollRedigerar.has(p.id))) {
-        const alt = (p.alternativ || []).map((a, i) => `
-          <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13px; font-weight:600;">
-            <input type="radio" name="poll-${p.id}" value="${i}" ${mitt && mitt.val === i ? "checked" : ""}> ${egEsc(a)}
-          </label>`).join("");
-        return `<div style="${ram}">
-          ${rubrik(`🗳️ Omröstning · slutar ${pollFmt(p.slutar_at)}`)}
-          <div style="font-size:13.5px; font-weight:800; margin-bottom:2px;">${egEsc(p.fraga)}</div>
-          <div style="margin-bottom:4px;">${pollAnonymEtikett(p)}</div>
-          ${alt}
-          ${p.tillat_fritext ? `<input class="field-input" type="text" id="poll-text-${p.id}" placeholder="Eget svar eller kommentar…" value="${egEsc((mitt && mitt.fritext) || "")}" style="margin-top:6px; font-size:16px;">` : ""}
-          <div id="poll-err-${p.id}" style="color:#b3261e; font-size:12px; font-weight:700;"></div>
-          <button class="btn-primary" style="margin-top:8px;" onclick="skickaPollSvar('${p.id}')">${mitt ? "Spara nytt svar" : "Rösta"}</button>
-        </div>`;
-      }
-      if (aktiv) {
-        const valt = mitt.val !== null && mitt.val !== undefined ? (p.alternativ || [])[mitt.val] : null;
-        const { data: live } = await sb.rpc("poll_resultat", { p_id: p.id });
-        return `<div style="${ram}">
-          ${rubrik(`🗳️ Omröstning · pågår till ${pollFmt(p.slutar_at)}`)}
-          <div style="font-size:13.5px; font-weight:800;">${egEsc(p.fraga)}</div>
-          <div style="margin-top:2px;">${pollAnonymEtikett(p)}</div>
-          <div style="font-size:12.5px; margin: 4px 0 8px; color:var(--green-700); font-weight:700;">✓ Du har röstat${valt ? `: ${egEsc(valt)}` : ""}${mitt.fritext ? ` · "${egEsc(mitt.fritext)}"` : ""}</div>
-          ${live ? `<div style="font-size:10.5px; font-weight:800; color:var(--muted); margin-bottom:3px;">RESULTAT HITTILLS</div>${pollResultatHtml(p, live, mitt.val, true)}` : ""}
-          <button class="btn-secondary" style="margin-top:8px; width:auto; padding:5px 12px; font-size:12px;" onclick="pollRedigerar.add('${p.id}'); renderTodayWidget(getCurrentUser());">Ändra svar</button>
-        </div>`;
-      }
-      const { data: res } = await sb.rpc("poll_resultat", { p_id: p.id });
-      return `<div style="${ram}">
-        ${rubrik("🗳️ Resultat av omröstning")}
-        <div style="font-size:13.5px; font-weight:800; margin-bottom:6px;">${egEsc(p.fraga)}</div>
-        <div style="margin-bottom:5px;">${pollAnonymEtikett(p)}</div>${pollResultatHtml(p, res || { antal: 0, counts: [], fritext: [] }, mitt ? mitt.val : null, true)}
+      const mitt = mina.get(p.id) || null;
+      pollCache[p.id] = { p, mitt };
+      const chip = aktiv
+        ? (mitt ? `<span style="font-size:11px; font-weight:800; color:var(--green-700); white-space:nowrap;">✓ Röstat</span>`
+                : `<span style="font-size:11px; font-weight:800; color:#fff; background:#2c5aa0; padding:2px 10px; border-radius:999px; white-space:nowrap;">Rösta</span>`)
+        : `<span style="font-size:11px; font-weight:800; color:#2c5aa0; white-space:nowrap;">Resultat ›</span>`;
+      return `<div onclick="openPollModal('${p.id}')" style="cursor:pointer; display:flex; align-items:center; gap:8px; background:#eef4ff; border:1px solid #b9cdee; border-radius:10px; padding:7px 10px; margin-bottom:6px;">
+        <span style="font-size:14px;">🗳️</span>
+        <span style="flex:1; min-width:0; font-size:12.5px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${egEsc(p.fraga)}</span>
+        ${chip}
       </div>`;
-    }));
-    return delar.join("");
+    }).join("");
   } catch (e) { return ""; }
+}
+
+async function openPollModal(id, redigera) {
+  let c = pollCache[id];
+  if (!c) {
+    const { data: p } = await sb.from("polls").select("*").eq("id", id).single();
+    if (!p) return;
+    const { data: m } = await sb.from("poll_svar").select("poll_id, val, fritext").eq("poll_id", id).eq("user_id", getCurrentUser().id).maybeSingle();
+    c = pollCache[id] = { p, mitt: m || null };
+  }
+  document.getElementById("poll-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "kassa-modal-overlay";
+  ov.id = "poll-overlay";
+  ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="kassa-modal-card" style="max-height:88vh; overflow-y:auto;"><div id="poll-modal-body"></div></div>`;
+  document.body.appendChild(ov);
+  await renderPollModalBody(id, !!redigera);
+}
+
+async function renderPollModalBody(id, redigera) {
+  const body = document.getElementById("poll-modal-body");
+  const c = pollCache[id];
+  if (!body || !c) return;
+  const { p, mitt } = c;
+  const aktiv = Date.now() < new Date(p.slutar_at).getTime();
+  const titel = `<div class="kassa-modal-title" style="margin-bottom:4px;">${egEsc(p.fraga)}</div><div style="margin-bottom:8px;">${pollAnonymEtikett(p)}</div>`;
+  const stang = `<button class="btn-secondary" onclick="document.getElementById('poll-overlay').remove()">Stäng</button>`;
+
+  if (aktiv && (!mitt || redigera)) {
+    const alt = (p.alternativ || []).map((a, i) => `
+      <label style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:14px; font-weight:600;">
+        <input type="radio" name="poll-${p.id}" value="${i}" ${mitt && mitt.val === i ? "checked" : ""}> ${egEsc(a)}
+      </label>`).join("");
+    body.innerHTML = `${titel}
+      <div style="font-size:11.5px; color:var(--muted); margin-bottom:6px;">Slutar ${pollFmt(p.slutar_at)}</div>
+      ${alt}
+      ${p.tillat_fritext ? `<input class="field-input" type="text" id="poll-text-${p.id}" placeholder="Eget svar eller kommentar…" value="${egEsc((mitt && mitt.fritext) || "")}" style="margin-top:6px; font-size:16px;">` : ""}
+      <div id="poll-err-${p.id}" style="color:#b3261e; font-size:12px; font-weight:700; min-height:14px;"></div>
+      <button class="btn-primary" onclick="skickaPollSvar('${p.id}')">${mitt ? "Spara nytt svar" : "Rösta"}</button>
+      ${stang}`;
+    return;
+  }
+
+  body.innerHTML = `${titel}<div style="font-size:12px; color:var(--muted);">Laddar resultat…</div>`;
+  const [resRes, profiler] = await Promise.all([sb.rpc("poll_resultat", { p_id: id }), fetchProfiles()]);
+  const res = resRes.data || { antal: 0, counts: [], fritext: [], svar: [] };
+  const totalt = p.mottagare ? p.mottagare.length : profiler.length;
+  const valt = mitt && mitt.val !== null && mitt.val !== undefined ? (p.alternativ || [])[mitt.val] : null;
+  const mott = p.mottagare ? profiler.filter(x => p.mottagare.includes(x.id)) : profiler;
+  const svarat = new Set((res.svar || []).map(x => x.user_id));
+  body.innerHTML = `${titel}
+    <div style="font-size:11.5px; color:var(--muted); margin-bottom:8px;">
+      ${aktiv ? `Pågår till ${pollFmt(p.slutar_at)}` : `Avslutad ${pollFmt(p.slutar_at)}`} · ${res.antal || 0} av ${totalt} har svarat
+    </div>
+    ${mitt ? `<div style="font-size:12.5px; color:var(--green-700); font-weight:700; margin-bottom:8px;">✓ Ditt svar${valt ? `: ${egEsc(valt)}` : ""}${mitt.fritext ? ` · "${egEsc(mitt.fritext)}"` : ""}</div>` : ""}
+    ${pollResultatHtml(p, res, mitt ? mitt.val : null)}
+    ${p.anonym ? "" : `<div style="margin-top:10px;">${pollNamnPerAlt(p, res, profiler)}</div>
+      <div style="font-size:12px; margin-top:8px;"><b>Har inte svarat:</b> ${egEsc(mott.filter(x => !svarat.has(x.id)).map(x => x.name).join(", ") || "—")}</div>`}
+    ${aktiv && mitt ? `<button class="btn-secondary" style="margin-top:12px;" onclick="renderPollModalBody('${p.id}', true)">Ändra svar</button>` : ""}
+    ${stang}`;
 }
 
 async function skickaPollSvar(id) {
@@ -2237,8 +2277,9 @@ async function skickaPollSvar(id) {
   const user = getCurrentUser();
   const { error } = await sb.from("poll_svar").upsert({ poll_id: id, user_id: user.id, val, fritext: fritext || null }, { onConflict: "poll_id,user_id" });
   if (error) { if (err) err.textContent = /row-level security/i.test(error.message) ? "Omröstningen är avslutad." : "Kunde inte spara: " + error.message; return; }
-  pollRedigerar.delete(id);
-  await renderTodayWidget(user);
+  pollCache[id].mitt = { poll_id: id, val, fritext: fritext || null };
+  await renderPollModalBody(id, false); // visar resultat direkt
+  renderTodayWidget(user, true); // uppdaterar raden i bakgrunden ("Rösta" -> "Röstat")
 }
 
 /* ---- Viktig information (fäst överst på startsidan) ---- */
@@ -13807,8 +13848,6 @@ function openFramtidaHandelser() {
 async function renderTodayWidget(user, tyst) {
   const wrap = document.getElementById("today-widget");
   if (!wrap) return;
-  // Pågår en röstning (valt alternativ / skriven text) hoppar bakgrundsuppdateringen över omritningen.
-  if (tyst && wrap.querySelector('input[name^="poll-"]:checked, input[id^="poll-text-"]:focus')) return;
   // Vid bakgrundsuppdatering (tyst) rensas inget — gamla innehållet står kvar tills det nya är klart.
   if (!tyst || !wrap.innerHTML.trim()) wrap.innerHTML = `<div class="today-card"><div class="today-date">Laddar…</div></div>`;
   // Pågående omröstningar hämtas parallellt med resten.
