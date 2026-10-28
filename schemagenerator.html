@@ -401,7 +401,7 @@
   .leave-block { --cat-color: var(--cat-leave); --cat-bg: var(--cat-leave-bg); }
   .pref-block { --cat-color: var(--ink-soft); --cat-bg: var(--surface-2); }
   .comp-ob-block { --cat-color: var(--cat-komp); --cat-bg: var(--cat-komp-bg); }
-  .uppdrag-row, .latestend-row, .leave-row {
+  .uppdrag-row, .latestend-row, .leave-row, .daylimit-row {
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 7px;
@@ -412,7 +412,7 @@
     gap: 10px;
   }
   .latestend-row .tmpl-days, .uppdrag-row .tmpl-days { flex-basis: auto; flex: 1 1 220px; }
-  .latestend-row .field, .uppdrag-row .field, .leave-row .field { flex: 0 1 150px; margin: 0; }
+  .latestend-row .field, .uppdrag-row .field, .leave-row .field, .daylimit-row .field { flex: 0 1 150px; margin: 0; }
   .inline-add {
     display: inline-flex;
     align-items: center;
@@ -1131,6 +1131,16 @@
         <button id="addEmployee" class="ghost">+ Lägg till en</button>
       </div>
     </div>
+    <div class="row" id="appImportRow" style="margin-bottom:14px; display:none;">
+      <div class="field" style="flex:1 1 220px;">
+        <label for="appPeriodSelect">Schemaperiod i appen</label>
+        <select id="appPeriodSelect"></select>
+      </div>
+      <div class="field" style="flex:0 1 auto; align-self:flex-end;">
+        <button id="importFromApp" class="ghost">Hämta önskemål från appen</button>
+      </div>
+      <div id="appImportStatus" class="hint" style="flex:1 1 100%; margin:4px 0 0;"></div>
+    </div>
     <div id="employeeList"></div>
   </section>
 
@@ -1577,6 +1587,13 @@ function addEmployeeRow(prefill) {
           <button type="button" class="icon ghost add-leave">+ Lägg till ledighet</button>
         </div>
       </div>
+      <div class="sub-block leave-block">
+        <div class="sub-block-label"><span class="sub-block-title">Dagsbegränsning</span> <span class="sub-block-desc">på ett visst datum: börja tidigast och/eller sluta senast (t.ex. önskemål från appen)</span></div>
+        <div class="daylimit-list"></div>
+        <div>
+          <button type="button" class="icon ghost add-daylimit">+ Lägg till dagsbegränsning</button>
+        </div>
+      </div>
       <div class="sub-block pref-block">
         <div class="sub-block-label"><span class="sub-block-title">Passönskemål</span> <span class="sub-block-desc">mjukt — påverkar bara vid oavgjort läge, garanterar inget</span></div>
         <div class="pref-shifts"></div>
@@ -1694,6 +1711,7 @@ function addEmployeeRow(prefill) {
     const row = document.createElement('div');
     row.className = 'leave-row';
     row.innerHTML = `
+      <div class="field leave-typ-wrap" style="display:none; flex:0 0 auto;"><label>Typ</label><span class="leave-typ-badge" style="font-size:12px; font-weight:700; color:var(--cat-leave);"></span></div>
       <div class="field">
         <label>Från datum</label>
         <input type="text" class="leave-from" placeholder="ÅÅÅÅ-MM-DD" autocomplete="off">
@@ -1710,6 +1728,44 @@ function addEmployeeRow(prefill) {
     leaveListDiv.appendChild(row);
   }
   card.querySelector('.add-leave').addEventListener('click', addLeaveRow);
+
+  // Ledighet från appen markeras med typ (semester, tjänsteledighet …) och
+  // src="app" så att en ny hämtning kan ersätta dem utan att röra manuella rader.
+  card._addLeave = (from, to, typ, src) => {
+    addLeaveRow();
+    const row = leaveListDiv.lastElementChild;
+    row.querySelector('.leave-from').value = from || '';
+    row.querySelector('.leave-to').value = to || '';
+    if (typ) {
+      row.dataset.typ = typ;
+      row.querySelector('.leave-typ-wrap').style.display = '';
+      row.querySelector('.leave-typ-badge').textContent = typ;
+    }
+    if (src) row.dataset.src = src;
+  };
+
+  // -- Dagsbegränsning: på ett specifikt datum, börja tidigast / sluta senast. --
+  const dayLimitListDiv = card.querySelector('.daylimit-list');
+  card._addDayLimit = (date, earliest, latest, src) => {
+    const row = document.createElement('div');
+    row.className = 'daylimit-row';
+    if (src) row.dataset.src = src;
+    row.innerHTML = `
+      <div class="field"><label>Datum</label><input type="text" class="dl-date" placeholder="ÅÅÅÅ-MM-DD" autocomplete="off"></div>
+      <div class="field"><label>Börja tidigast</label><input type="text" class="dl-early" placeholder="HH:MM" autocomplete="off"></div>
+      <div class="field"><label>Sluta senast</label><input type="text" class="dl-late" placeholder="HH:MM" autocomplete="off"></div>
+      <button type="button" class="icon ghost remove-x" title="Ta bort">✕</button>`;
+    row.querySelector('.remove-x').addEventListener('click', () => row.remove());
+    attachDatePicker(row.querySelector('.dl-date'));
+    row.querySelector('.dl-date').value = date || '';
+    row.querySelector('.dl-early').value = earliest || '';
+    row.querySelector('.dl-late').value = latest || '';
+    dayLimitListDiv.appendChild(row);
+  };
+  card.querySelector('.add-daylimit').addEventListener('click', () => card._addDayLimit('', '', '', ''));
+  card._clearFromApp = () => {
+    card.querySelectorAll('.leave-row[data-src="app"], .daylimit-row[data-src="app"]').forEach(r => r.remove());
+  };
 
   // -- Prefill from a saved employee object (same shape readEmployees()
   // returns) — used to restore a local save. --
@@ -1759,12 +1815,8 @@ function addEmployeeRow(prefill) {
         : Object.values(u.dayMinutes || {}).some(m => m >= 360);
       row.querySelectorAll('.uppdrag-day-cb').forEach(cb => cb.dispatchEvent(new Event('change', { bubbles: true })));
     });
-    (prefill.leave || []).forEach(l => {
-      addLeaveRow();
-      const row = leaveListDiv.lastElementChild;
-      row.querySelector('.leave-from').value = l.from || '';
-      row.querySelector('.leave-to').value = l.to || '';
-    });
+    (prefill.leave || []).forEach(l => card._addLeave(l.from, l.to, l.typ, l.src));
+    (prefill.dayLimits || []).forEach(l => card._addDayLimit(l.date, l.earliestStart, l.latestEnd, l.src));
     card._prefPreferred = prefill.preferredShiftTypes || [];
   }
   syncPrefShiftOptions(card);
@@ -2281,8 +2333,19 @@ function readEmployees() {
     const leave = [...c.querySelectorAll('.leave-row')].map(row => {
       const from = row.querySelector('.leave-from').value.trim();
       const to = row.querySelector('.leave-to').value.trim();
-      return { from, to };
+      const out = { from, to };
+      if (row.dataset.typ) out.typ = row.dataset.typ;
+      if (row.dataset.src) out.src = row.dataset.src;
+      return out;
     }).filter(l => l.from && l.to && l.from <= l.to);
+    const dayLimits = [...c.querySelectorAll('.daylimit-row')].map(row => {
+      const date = row.querySelector('.dl-date').value.trim();
+      const earliestStart = row.querySelector('.dl-early').value.trim() || null;
+      const latestEnd = row.querySelector('.dl-late').value.trim() || null;
+      const out = { date, earliestStart, latestEnd };
+      if (row.dataset.src) out.src = row.dataset.src;
+      return out;
+    }).filter(l => l.date && (l.earliestStart || l.latestEnd));
     return {
       id: c.dataset.id,
       name: c.querySelector('.emp-name').value.trim() || '(namnlös)',
@@ -2298,6 +2361,7 @@ function readEmployees() {
       competencyFrequency: c.querySelector('.emp-comp-freq').value || 'vecka', // vecka | varannan | manad | period — how often an occurrence happens
       obEnabled: c.querySelector('.emp-ob-enabled').checked, // OB (obekväm arbetstid) credits saldo-hours at 1.5x/2x for this person only — off by default, opt-in per employee
       uppdrag, // [{name, weekdays:["Tisdag",...], minutes}] — recurring every week: never scheduled these weekdays, minutes counted toward timsaldo each matching weekday
+      dayLimits, // [{date:"YYYY-MM-DD", earliestStart:"HH:MM"|null, latestEnd:"HH:MM"|null}] — only that date
       leave, // [{from:"YYYY-MM-DD", to:"YYYY-MM-DD"}] — never scheduled in range; weekdays count as 8h×pct/100, weekends 0h
       preferredShiftTypes: [...c.querySelectorAll('.pref-shift-cb:checked')].map(cb => cb.value), // soft — only nudges which of an employee's own eligible slots they're offered first
     };
@@ -2331,9 +2395,20 @@ function getLatestEndFor(e, weekday) {
   if (e.latestEndByDay && e.latestEndByDay[weekday]) return e.latestEndByDay[weekday];
   return e.latestEnd;
 }
-function exceedsLatestEnd(e, weekday, endTime) {
+function exceedsLatestEnd(e, weekday, endTime, date, startTime) {
   const le = getLatestEndFor(e, weekday);
-  return !!(le && endTime > le);
+  if (le && endTime > le) return true;
+  // Dagsbegränsningar på ett specifikt datum (t.ex. från appens önskemål):
+  // "sluta senast" och "börja tidigast" gäller bara den dagen.
+  if (date && e.dayLimits && e.dayLimits.length) {
+    const dk = typeof date === 'string' ? date : fmtDate(date);
+    for (const l of e.dayLimits) {
+      if (l.date !== dk) continue;
+      if (l.latestEnd && endTime > l.latestEnd) return true;
+      if (l.earliestStart && startTime && startTime < l.earliestStart) return true;
+    }
+  }
+  return false;
 }
 // Ledighet: date-range based (not tied to a weekday), so it's checked against
 // the actual calendar date — "YYYY-MM-DD" strings compare correctly with <=/>=.
@@ -2941,7 +3016,7 @@ function runAssignment(plan, employees, maxConsecutive, startDate, endDate, dygn
     }
     function isEligibleToday(e) {
       return passesHardRules(e) && dayEntries.some(entry =>
-        !exceedsLatestEnd(e, weekday, entry.shift.end) && withinMaxHours(e, netDuration(entry.shift)) && restOk(e, date, entry.shift) && vvOk(e, entry.shift));
+        !exceedsLatestEnd(e, weekday, entry.shift.end, date, entry.shift.start) && withinMaxHours(e, netDuration(entry.shift)) && restOk(e, date, entry.shift) && vvOk(e, entry.shift));
     }
     // Count of DISTINCT shift types this employee could take today (not slot
     // copies). Someone like a person with an early latestEnd can often only
@@ -2956,7 +3031,7 @@ function runAssignment(plan, employees, maxConsecutive, startDate, endDate, dygn
     // before it's gone, and the flexible people reshuffle around them.
     function eligibleTypeCount(e) {
       return dayEntries.filter(entry =>
-        !exceedsLatestEnd(e, weekday, entry.shift.end) && withinMaxHours(e, netDuration(entry.shift)) && restOk(e, date, entry.shift) && vvOk(e, entry.shift)).length;
+        !exceedsLatestEnd(e, weekday, entry.shift.end, date, entry.shift.start) && withinMaxHours(e, netDuration(entry.shift)) && restOk(e, date, entry.shift) && vvOk(e, entry.shift)).length;
     }
 
     // Plain ratio order — NOT deprioritizing weekend-reserved employees here.
@@ -2985,7 +3060,7 @@ function runAssignment(plan, employees, maxConsecutive, startDate, endDate, dygn
     });
 
     let owner = matchSlots(slots, order, wk, (e, slot) =>
-      passesHardRules(e) && !exceedsLatestEnd(e, weekday, slot.shift.end) && withinMaxHours(e, slot.duration) && restOk(e, date, slot.shift) && vvOk(e, slot.shift) && !isExcluded(e, date, slot.shift.name));
+      passesHardRules(e) && !exceedsLatestEnd(e, weekday, slot.shift.end, date, slot.shift.start) && withinMaxHours(e, slot.duration) && restOk(e, date, slot.shift) && vvOk(e, slot.shift) && !isExcluded(e, date, slot.shift.name));
 
     const unmatchedIdx = owner.map((o, i) => o === null ? i : -1).filter(i => i >= 0);
     if (unmatchedIdx.length > 0) {
@@ -2995,7 +3070,7 @@ function runAssignment(plan, employees, maxConsecutive, startDate, endDate, dygn
       const unusedOrder = order.filter(e => !usedIds.has(e.id) && !reservations[e.id]);
       const remaining = unmatchedIdx.map(i => slots[i]);
       const relaxedOwner = matchSlots(remaining, unusedOrder, wk, (e, slot) =>
-        passesHardRules(e) && !exceedsLatestEnd(e, weekday, slot.shift.end) && restOk(e, date, slot.shift) && vvOk(e, slot.shift) && !isExcluded(e, date, slot.shift.name));
+        passesHardRules(e) && !exceedsLatestEnd(e, weekday, slot.shift.end, date, slot.shift.start) && restOk(e, date, slot.shift) && vvOk(e, slot.shift) && !isExcluded(e, date, slot.shift.name));
       relaxedOwner.forEach((empId, ri) => { if (empId) owner[unmatchedIdx[ri]] = empId; });
     }
 
@@ -3052,7 +3127,7 @@ function runAssignment(plan, employees, maxConsecutive, startDate, endDate, dygn
       return true;
     }
     function withinLatestEnd(e, pair) {
-      return !(exceedsLatestEnd(e, 'Lördag', pair.sat.shift.end) || exceedsLatestEnd(e, 'Söndag', pair.sun.shift.end));
+      return !(exceedsLatestEnd(e, 'Lördag', pair.sat.shift.end, satDate, pair.sat.shift.start) || exceedsLatestEnd(e, 'Söndag', pair.sun.shift.end, sunDate, pair.sun.shift.start));
     }
     function withinMaxHours(e, pair) {
       const st = state[e.id];
@@ -3122,7 +3197,7 @@ function runAssignment(plan, employees, maxConsecutive, startDate, endDate, dygn
         const backfill = matchSlots(remaining, order, wk, (e, pair) =>
           !(e.offDays && (e.offDays.includes('Lördag') || e.offDays.includes('Söndag'))) &&
           passesWeekendPolicy(e, w.satDate) && !isOnLeave(e, w.satDate) && !isOnLeave(e, w.sunDate) &&
-          !(exceedsLatestEnd(e, 'Lördag', pair.sat.shift.end) || exceedsLatestEnd(e, 'Söndag', pair.sun.shift.end)) &&
+          !(exceedsLatestEnd(e, 'Lördag', pair.sat.shift.end, w.satDate, pair.sat.shift.start) || exceedsLatestEnd(e, 'Söndag', pair.sun.shift.end, w.sunDate, pair.sun.shift.start)) &&
           restOk(e, w.satDate, pair.sat.shift) &&
           veckovilaOk(e, w.satDate, [shiftInterval(w.satDate, pair.sat.shift), shiftInterval(w.sunDate, pair.sun.shift)]) &&
           (shiftStartDateTime(w.sunDate, pair.sun.shift) - shiftEndDateTime(w.satDate, pair.sat.shift)) / 3600000 >= dygnsvilaHours - 0.01);
@@ -3365,7 +3440,7 @@ function fillRemainingGaps(result, employees, maxConsecutive, dygnsvilaHours, st
           if (e.offDays && e.offDays.includes(weekday)) return false;
           if (isOnLeave(e, date)) return false;
           if ((weekday === 'Lördag' || weekday === 'Söndag') && !passesWeekendPolicy(e, date)) return false;
-          if (exceedsLatestEnd(e, weekday, shift.end)) return false;
+          if (exceedsLatestEnd(e, weekday, shift.end, date, shift.start)) return false;
           const st = result.state[e.id];
           const maxH = 48 * e.pct / 100;
           if ((st.weeklyRealHours[wk] || 0) + duration > maxH + 0.01) return false;
@@ -3474,7 +3549,7 @@ function resolveSurplusVacancies(result, employees, surplusShift, maxConsecutive
     if (isOnLeave(e, row.date)) out.push('ledighet');
     const hd = uppdragHeldagOn(e, row.date);
     if (hd) out.push(`heldagsuppdrag (${hd.name})`);
-    if (exceedsLatestEnd(e, row.weekday, row.end)) {
+    if (exceedsLatestEnd(e, row.weekday, row.end, row.date, shift.start)) {
       const le = (e.latestEndByDay && e.latestEndByDay[row.weekday]) || e.latestEnd;
       out.push(`sluta senast ${le} (passet slutar ${row.end})`);
     }
@@ -5521,6 +5596,45 @@ document.getElementById('saveLocalBtn').addEventListener('click', () => {
   s.textContent = src;
   document.body.appendChild(s);
   if (window.__genDbStatus && typeof setLocalSaveStatus === 'function') setLocalSaveStatus(window.__genDbStatus, 'err');
+
+  // Hämta önskemål (semester, ledighet, tjänste-/föräldraledighet, dagsbegränsningar) från appens schemaperioder.
+  try {
+    const per = await sb.from('schemaperiod').select('*').order('fran_datum', { ascending: false });
+    const importRow = document.getElementById('appImportRow');
+    if (!per.error && per.data && per.data.length && importRow) {
+      importRow.style.display = '';
+      const sel = document.getElementById('appPeriodSelect');
+      sel.innerHTML = per.data.map(p => '<option value="' + p.id + '">' + p.namn.replace(/</g, '&lt;') + ' (' + p.fran_datum + ' – ' + p.till_datum + ')</option>').join('');
+      const status = document.getElementById('appImportStatus');
+      document.getElementById('importFromApp').addEventListener('click', async () => {
+        status.textContent = 'Hämtar…';
+        const [on, pf] = await Promise.all([
+          sb.from('schemaonskemal').select('*').eq('period_id', sel.value).order('fran_datum'),
+          sb.from('profiles').select('id, name'),
+        ]);
+        if (on.error || pf.error) { status.textContent = 'Kunde inte hämta: ' + (on.error || pf.error).message; return; }
+        const norm = x => (x || '').trim().toLowerCase();
+        const nameById = {};
+        pf.data.forEach(x => { nameById[x.id] = x.name; });
+        const cards = [...document.querySelectorAll('#employeeList > *')];
+        const cardByName = {};
+        cards.forEach(c => { const n = norm(c.querySelector('.emp-name') && c.querySelector('.emp-name').value); if (n) cardByName[n] = c; });
+        cards.forEach(c => c._clearFromApp && c._clearFromApp());
+        const LABEL = { semester: 'Semester', ledig_dag: 'Ledig', tjansteledighet: 'Tjänsteledighet', foraldraledighet: 'Föräldraledighet' };
+        const saknas = new Set(); let antal = 0;
+        on.data.forEach(o => {
+          const name = nameById[o.user_id];
+          const c = cardByName[norm(name)];
+          if (!c) { saknas.add(name || 'okänd'); return; }
+          if (o.typ === 'ledig_del') c._addDayLimit(o.fran_datum, o.tidigast_start, o.senast_slut, 'app');
+          else c._addLeave(o.fran_datum, o.till_datum, LABEL[o.typ] || o.typ, 'app');
+          antal++;
+        });
+        employeeListEl.dispatchEvent(new Event('change', { bubbles: true }));
+        status.textContent = antal + ' önskemål inlagda' + (saknas.size ? '. Ingen medarbetarrad med namnet: ' + [...saknas].join(', ') + ' (t.ex. studenter eller felstavat namn).' : '.');
+      });
+    }
+  } catch (e) { console.error(e); }
 })();
 </script>
 
