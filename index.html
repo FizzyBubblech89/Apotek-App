@@ -221,7 +221,9 @@
   .today-task-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--green-700); margin-top: 2px; flex-shrink: 0; }
   .today-task-row.done span { text-decoration: line-through; color: var(--muted); }
   .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card-badge { position:absolute; top:9px; right:12px; font-size:10px; font-weight:700; color:var(--green-700); background:rgba(255,255,255,.75); border-radius:8px; padding:1px 6px; }
   .nav-card {
+    position: relative;
     background: linear-gradient(150deg, var(--white), var(--green-100));
     border: 1px solid var(--green-300);
     border-radius: 22px;
@@ -1781,8 +1783,16 @@ async function renderHomeForUser(user, tyst) {
     const hbBarHtml = hbTot > 0 ? `<div style="margin-top:7px;">
         <div style="display:flex; justify-content:space-between; font-size:10.5px; font-weight:700; margin-bottom:3px;"><span>Hållbarhet</span><span>${Math.round((hbKlara / hbTot) * 100)}%</span></div>
         ${hbProgressHtml(hbKlara, hbTot, 5)}</div>` : "";
+    let lagerBadge = "";
+    try {
+      const nu = new Date();
+      const { data: cl } = await sb.from("lager_checklista").select("klar").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1);
+      if (cl && cl.length) lagerBadge = `<span class="card-badge">${cl.filter(x => x.klar).length} av ${cl.length}</span>`;
+    } catch (e) {}
+    if (renderSeq !== homeRenderSeq) return;
     lagerCardWrap.innerHTML = `
       <div class="nav-card ${lagerSubParts.length ? "nav-card-alert" : ""}" onclick="showLager()">
+        ${lagerBadge}
         <div class="nav-icon nav-icon-c2">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 7L12 3L21 7L12 11L3 7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 7V17L12 21V11" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M21 7V17L12 21" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
         </div>
@@ -1795,8 +1805,16 @@ async function renderHomeForUser(user, tyst) {
 
   const kvalitetCardWrap = document.getElementById("nav-card-kvalitet");
   if (kvalitetCardWrap) {
+    let kvalBadge = "";
+    try {
+      const nu = new Date();
+      const { data: ck } = await sb.from("kvalitet_checklista").select("klar").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1);
+      if (ck && ck.length) kvalBadge = `<span class="card-badge">${ck.filter(x => x.klar).length} av ${ck.length}</span>`;
+    } catch (e) {}
+    if (renderSeq !== homeRenderSeq) return;
     kvalitetCardWrap.innerHTML = `
       <div class="nav-card" onclick="showKvalitet()">
+        ${kvalBadge}
         <div class="nav-icon nav-icon-c1">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2L14.5 8.5L21 9.5L16.5 14L17.5 20.5L12 17.5L6.5 20.5L7.5 14L3 9.5L9.5 8.5L12 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         </div>
@@ -7475,6 +7493,22 @@ function exportLagerChecklistaPdf(ar, manad) {
   doc.save(`varuansvarig-checklista-${ar}-${String(manad).padStart(2, "0")}.pdf`);
 }
 
+function utfordDatumHtml(tabell, r, interaktiv) {
+  if (!r.klar || r.ej_aktuellt) return "";
+  const val = r.utford_datum || isoDate(new Date(r.signerad_at));
+  if (!interaktiv) return `<span style="color:var(--muted);">Utförd: ${fmtSvShort(val)}</span>`;
+  return `<label style="color:var(--muted); display:inline-flex; align-items:center; gap:4px;">Utförd: <input type="date" value="${val}" max="${isoDate(new Date())}" onchange="setUtfordDatum('${tabell}', '${r.id}', this.value)" style="font-size:11px; padding:1px 4px; border:1px solid var(--line); border-radius:6px; background:#fff;"></label>`;
+}
+
+async function setUtfordDatum(tabell, id, val) {
+  if (!val) return;
+  const { error } = await sb.from(tabell).update({ utford_datum: val }).eq("id", id);
+  if (error) { alert("Kunde inte spara datum: " + error.message); return; }
+  const cache = tabell === "lager_checklista" ? lagerChecklistaCache : kvalitetCache;
+  const rad = cache.find(x => x.id === id);
+  if (rad) rad.utford_datum = val;
+}
+
 function lagerChecklistaPosterHtml(interaktiv) {
   // Gruppera raderna per aktivitetsnamn — veckovisa aktiviteter har
   // fyra rader (vecka 1-4) som ska visas tillsammans under samma kort.
@@ -7503,7 +7537,7 @@ function lagerChecklistaPosterHtml(interaktiv) {
             </label>
           `).join("")}
         </div>
-        ${rader.filter(r => r.klar).map(r => `<div style="font-size:10px; color:var(--green-700); margin-top:2px;">v${r.vecka} signerad: ${r.signerad_signum} · ${fmtSvShort(isoDate(new Date(r.signerad_at)))} ${fmtTime(new Date(r.signerad_at))}</div>`).join("")}`
+        ${rader.filter(r => r.klar).map(r => `<div style="font-size:10px; color:var(--green-700); margin-top:2px;">v${r.vecka} signerad: ${r.signerad_signum} · ${fmtSvShort(isoDate(new Date(r.signerad_at)))} ${fmtTime(new Date(r.signerad_at))} · ${utfordDatumHtml("lager_checklista", r, interaktiv)}</div>`).join("")}`
       : `${interaktiv
           ? `<input type="checkbox" ${forsta.klar ? "checked" : ""} onchange="toggleLagerChecklistaKlar('${forsta.id}', this.checked)" style="margin-top:2px;">`
           : `<span style="margin-top:1px;">${forsta.klar ? "✅" : "⬜"}</span>`}`;
@@ -7520,7 +7554,7 @@ function lagerChecklistaPosterHtml(interaktiv) {
             <div style="font-size:11px; margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">
               <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv && isChef() ? ` <a href="#" onclick='event.preventDefault(); openLagerChecklistaTilldela("${forsta.id}", ${JSON.stringify(rader.map(r => r.id))})' style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
               ${forsta.deadline ? `<span style="font-weight:700; color:${!forsta.klar && forsta.deadline < isoDate(new Date()) ? "#b3261e" : "var(--muted)"};">${!forsta.klar && forsta.deadline < isoDate(new Date()) ? "⏰ Försenad, deadline var " : "Deadline: "}${fmtSvShort(forsta.deadline)}</span>` : ""}
-              ${!veckovis && forsta.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${forsta.signerad_signum} · ${fmtSvShort(isoDate(new Date(forsta.signerad_at)))} ${fmtTime(new Date(forsta.signerad_at))}</span>` : ""}
+              ${!veckovis && forsta.klar ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${forsta.signerad_signum} · ${fmtSvShort(isoDate(new Date(forsta.signerad_at)))} ${fmtTime(new Date(forsta.signerad_at))}</span>${utfordDatumHtml("lager_checklista", forsta, interaktiv)}` : ""}
             </div>
           </div>
         </div>
@@ -7543,8 +7577,8 @@ function renderLagerChecklistaPoster(allaKlara) {
 async function toggleLagerChecklistaKlar(id, checked) {
   const user = getCurrentUser();
   const patch = checked
-    ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
-    : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null };
+    ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString(), utford_datum: isoDate(new Date()) }
+    : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null, utford_datum: null };
   const { error } = await sb.from("lager_checklista").update(patch).eq("id", id);
   if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
   await loadLagerChecklista(lagerChecklistaAr, lagerChecklistaManad);
@@ -7961,7 +7995,7 @@ function kvalitetPosterHtml(interaktiv) {
               <span style="color:var(--muted);">Tilldelad: ${tilldelad ? tilldelad.name : "Ingen"}${interaktiv ? ` <a href="#" onclick='event.preventDefault(); openKvalitetTilldela("${p.id}")' style="color:var(--green-700); font-weight:700;">Ändra</a>` : ""}</span>
               ${p.deadline ? `<span style="font-weight:700; color:${!p.klar && p.deadline < isoDate(new Date()) ? "#b3261e" : "var(--muted)"};">${!p.klar && p.deadline < isoDate(new Date()) ? "⏰ Försenad, deadline var " : "Deadline: "}${fmtSvShort(p.deadline)}</span>` : ""}
               ${p.klar && p.ej_aktuellt ? `<span style="color:var(--green-700); font-weight:700;">Ej aktuellt · markerat av ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
-              ${p.klar && !p.ej_aktuellt ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>` : ""}
+              ${p.klar && !p.ej_aktuellt ? `<span style="color:var(--green-700); font-weight:700;">Signerad: ${p.signerad_signum} · ${fmtSvShort(isoDate(new Date(p.signerad_at)))} ${fmtTime(new Date(p.signerad_at))}</span>${utfordDatumHtml("kvalitet_checklista", p, interaktiv)}` : ""}
             </div>
           </div>
         </div>
@@ -7973,8 +8007,8 @@ function kvalitetPosterHtml(interaktiv) {
 async function toggleKvalitetKlar(id, checked) {
   const user = getCurrentUser();
   const patch = checked
-    ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString(), ej_aktuellt: false }
-    : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null, ej_aktuellt: false };
+    ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString(), ej_aktuellt: false, utford_datum: isoDate(new Date()) }
+    : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null, ej_aktuellt: false, utford_datum: null };
   const { error } = await sb.from("kvalitet_checklista").update(patch).eq("id", id);
   if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
   await loadKvalitetManad(kvalitetAr, kvalitetManad);
@@ -7984,8 +8018,8 @@ async function toggleKvalitetKlar(id, checked) {
 async function toggleKvalitetEjAktuellt(id, checked) {
   const user = getCurrentUser();
   const patch = checked
-    ? { klar: true, ej_aktuellt: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
-    : { klar: false, ej_aktuellt: false, signerad_av: null, signerad_signum: null, signerad_at: null };
+    ? { klar: true, ej_aktuellt: true, utford_datum: null, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
+    : { klar: false, ej_aktuellt: false, utford_datum: null, signerad_av: null, signerad_signum: null, signerad_at: null };
   const { error } = await sb.from("kvalitet_checklista").update(patch).eq("id", id);
   if (error) { alert("Kunde inte uppdatera: " + error.message); return; }
   await loadKvalitetManad(kvalitetAr, kvalitetManad);
@@ -8464,6 +8498,19 @@ function hamtaMinArbetstidForDag(iso) {
   if (!dagensPass.length) return "";
   return dagensPass.map(e => `${fmtTime(e.start)}–${fmtTime(e.end)}`).join(", ");
 }
+
+function schemaGrupp(profile) {
+  const u = (profile && profile.utbildning) || "";
+  if (u.startsWith("Farmacevt")) return 0;
+  if (u === "Apotekstekniker") return 1;
+  if (u === "Apoteksassistent") return 2;
+  return 3;
+}
+const SCHEMA_GRUPP_FARG = ["#e3f1fb", "#e9f7e4", "#fdf0dc", "#f1f1f1"];
+function sorteraSchemaGrupp(list) {
+  return list.slice().sort((a, b) => schemaGrupp(a.profile) - schemaGrupp(b.profile) || (a.profile.name || "").localeCompare(b.profile.name || "", "sv"));
+}
+function schemaRowStyle(profile) { return `background:${SCHEMA_GRUPP_FARG[schemaGrupp(profile)]};`; }
 
 function utbildningsgrupp(utbildning) {
   if (!utbildning) return null;
@@ -10274,8 +10321,8 @@ async function synkaHbChecklista() {
   try {
     await ensureLagerChecklistaFinns(r.ar, r.manad);
     const patch = allaKlara
-      ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString() }
-      : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null };
+      ? { klar: true, signerad_av: user.id, signerad_signum: user.signum, signerad_at: new Date().toISOString(), utford_datum: isoDate(new Date()) }
+      : { klar: false, signerad_av: null, signerad_signum: null, signerad_at: null, utford_datum: null };
     const { error } = await sb.from("lager_checklista").update(patch).eq("ar", r.ar).eq("manad", r.manad).eq("aktivitet", "Hållbarhet");
     if (error) console.error("Kunde inte synka checklistan", error);
   } catch (e) { console.error(e); }
@@ -13485,7 +13532,7 @@ function profilesWithScheduleOrAbsence(iso) {
   const extra = sharedAllProfiles
     .filter(p => !scheduledIds.has(p.id) && absenceOn(p.id, iso))
     .map(p => ({ profile: p, events: [] }));
-  return [...sharedSchedules, ...extra];
+  return sorteraSchemaGrupp([...sharedSchedules, ...extra]);
 }
 
 
@@ -13536,7 +13583,7 @@ function renderSharedWeek() {
         if (absence) statusHtml = `<span style="color:${franvaroTyp(absence).text}; font-weight:700;">${franvaroTyp(absence).label}</span>`;
         else statusHtml = `<span style="font-weight:700;">${fmtTime(c.start)}–${fmtTime(c.end)}</span>`;
         return `
-        <div class="kassa-row" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
+        <div class="kassa-row" style="${schemaRowStyle(profile)}" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
           <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
             ${avatarHtml(profile, 24, franvaroDotColor(absence))}
             <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;${absence ? ` color:${franvaroTyp(absence).text};` : ""}">${profile.name}</span>
@@ -13711,7 +13758,7 @@ function openSharedDayDetail(iso) {
     else if (c.isOff) statusHtml = `<span style="color:var(--muted);">Ledig</span>`;
     else statusHtml = `<span style="font-weight:700;">${fmtTime(c.start)}–${fmtTime(c.end)}</span>`;
     return `
-      <div class="kassa-row" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
+      <div class="kassa-row" style="${schemaRowStyle(profile)}" onclick="openSharedPersonDayDetail('${profile.id}', '${iso}')">
         <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
           ${avatarHtml(profile, 24, franvaroDotColor(absence))}
           <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;${absence ? ` color:${franvaroTyp(absence).text};` : ""}">${profile.name}</span>
