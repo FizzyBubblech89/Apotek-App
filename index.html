@@ -1786,7 +1786,11 @@ async function renderHomeForUser(user, tyst) {
     let lagerBadge = "";
     try {
       const nu = new Date();
-      const { data: cl } = await sb.from("lager_checklista").select("klar").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1);
+      let { data: cl } = await sb.from("lager_checklista").select("klar").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1);
+      if (!cl || !cl.length) { // ny månad: skapa månadens rader så statusen visas direkt
+        await ensureLagerChecklistaFinns(nu.getFullYear(), nu.getMonth() + 1);
+        ({ data: cl } = await sb.from("lager_checklista").select("klar").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1));
+      }
       if (cl && cl.length) lagerBadge = `<span class="card-badge">${cl.filter(x => x.klar).length} av ${cl.length}</span>`;
     } catch (e) {}
     if (renderSeq !== homeRenderSeq) return;
@@ -1808,7 +1812,11 @@ async function renderHomeForUser(user, tyst) {
     let kvalBadge = "";
     try {
       const nu = new Date();
-      const { data: ck } = await sb.from("kvalitet_checklista").select("klar").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1);
+      let { data: ck } = await sb.from("kvalitet_checklista").select("klar").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1);
+      if (!ck || !ck.length) {
+        await ensureKvalitetChecklistaFinns(nu.getFullYear());
+        ({ data: ck } = await sb.from("kvalitet_checklista").select("klar").eq("ar", nu.getFullYear()).eq("manad", nu.getMonth() + 1));
+      }
       if (ck && ck.length) kvalBadge = `<span class="card-badge">${ck.filter(x => x.klar).length} av ${ck.length}</span>`;
     } catch (e) {}
     if (renderSeq !== homeRenderSeq) return;
@@ -14379,15 +14387,15 @@ async function renderTodayWidget(user, tyst) {
     noticeBlocks.push(`
       <div style="background:var(--green-050); border:1px solid var(--green-300); border-radius:10px; padding:8px 10px; margin-bottom:4px;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
-          <div style="font-size:11px; font-weight:800; color:var(--green-700); text-transform:uppercase; letter-spacing:0.03em;">📌 Kommande händelser</div>
-          <div onclick="openFramtidaHandelser()" style="cursor:pointer; font-size:11px; font-weight:800; color:var(--green-700); white-space:nowrap;">Se framtida händelser ›</div>
+          <div style="font-size:9.5px; font-weight:800; color:var(--green-700); text-transform:uppercase; letter-spacing:0.03em; white-space:nowrap;">📌 Kommande händelser</div>
+          <div onclick="openFramtidaHandelser()" style="cursor:pointer; font-size:9.5px; font-weight:800; color:var(--green-700); white-space:nowrap;">Se framtida händelser ›</div>
         </div>
         ${kommandeRubriker.length ? kommandeRubriker.map(r => {
           const dagLabel = r.datum === todayIso ? "Idag" : r.datum === imorgonIso ? "Imorgon" : fmtSvShort(r.datum);
           return `
             <div onclick="openHeadingDetailModal('${r.id}', '${r.datum}')" style="cursor:pointer; display:flex; gap:8px; align-items:baseline; padding:3px 0;">
-              <span style="font-size:11px; font-weight:800; color:var(--green-700); white-space:nowrap;">${dagLabel}</span>
-              <span style="font-size:12px; font-weight:700; flex:1;">${egEsc(r.text)}</span>
+              <span style="font-size:10px; font-weight:800; color:var(--green-700); white-space:nowrap;">${dagLabel}</span>
+              <span style="font-size:11px; font-weight:700; flex:1;">${egEsc(r.text)}</span>
             </div>
           `;
         }).join("") : `<div style="font-size:12px; color:var(--muted);">Inget de närmaste 7 dagarna.</div>`}
@@ -14531,6 +14539,7 @@ async function renderTodayWidget(user, tyst) {
 
   wrap.innerHTML = `
     <div class="today-card">
+      <div class="today-date">${dateLabel}</div>
       ${viktigInfoHtml}${pollHtml}
       ${dagStjarna.length || veckaStjarna.length ? `
         <div style="background:linear-gradient(135deg, #fff8e1, #fff0c2); border:1px solid #f0d878; border-radius:12px; padding:8px 10px; margin-bottom:8px;">
@@ -14543,7 +14552,6 @@ async function renderTodayWidget(user, tyst) {
           🔔 ${noticeBlocks.length} saker väntar på dig — tryck för att se
         </div>
       ` : noticeBlocks.join("")}
-      <div class="today-date">${dateLabel}</div>
       ${todayPeople.length ? `
         <div class="today-working">
           ${todayPeople.map(({ profile }) => { const typ = franvaroTyp(absenceOn(profile.id, todayIso)); return `
