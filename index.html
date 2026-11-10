@@ -3181,6 +3181,75 @@ async function showProfile() {
   await renderProfileView();
 }
 
+/* ---- Prestationer (räknas live från befintlig data, inga nya tabeller) ---- */
+const ROLLFUNKTION_TITEL = {};
+const PRESTATIONER = [
+  { id: "check", ikon: "✅", namn: "Checklistkollen", beskr: "Avbockade punkter i Lager- och Kvalité-checklistorna", niv: [10, 30, 100] },
+  { id: "stjarna", ikon: "⭐", namn: "Stjärnan", beskr: "Stjärnor från chefen", niv: [1, 3, 10] },
+  { id: "uppg", ikon: "📋", namn: "Uppgiftsklarare", beskr: "Klarade tilldelade uppgifter", niv: [5, 25, 100] },
+  { id: "kassa", ikon: "💰", namn: "Kassakoll", beskr: "Inlagda kassaredovisningar", niv: [5, 25, 100] },
+  { id: "rost", ikon: "🗳️", namn: "Engagerad", beskr: "Besvarade omröstningar", niv: [1, 5, 15] },
+  { id: "onskemal", ikon: "📅", namn: "Planerare", beskr: "Lämnade schemaönskemål", niv: [1, 3, 6] },
+];
+const PRESTATION_NIVA = [
+  { namn: "Brons", farg: "#b8793a" },
+  { namn: "Silver", farg: "#8a96a3" },
+  { namn: "Guld", farg: "#d4a017" },
+];
+
+async function prestationRakna(q) {
+  try { const { count, error } = await q; return error ? 0 : (count || 0); } catch (e) { return 0; }
+}
+
+async function renderPrestationer(user) {
+  const wrap = document.getElementById("profile-prestationer");
+  if (!wrap) return;
+  const head = (t) => sb.from(t).select("id", { count: "exact", head: true });
+  const [lc, kc, st, up, ka, ro, on] = await Promise.all([
+    prestationRakna(head("lager_checklista").eq("signerad_av", user.id).eq("klar", true)),
+    prestationRakna(head("kvalitet_checklista").eq("signerad_av", user.id).eq("klar", true).eq("ej_aktuellt", false)),
+    prestationRakna(head("stjarna").eq("user_id", user.id)),
+    prestationRakna(head("tilldelade_uppgifter").eq("target_user_id", user.id).eq("is_done", true)),
+    prestationRakna(head("kassaredovisningar").eq("user_id", user.id)),
+    prestationRakna(head("poll_svar").eq("user_id", user.id)),
+    prestationRakna(head("schemaonskemal").eq("user_id", user.id)),
+  ]);
+  const antal = { check: lc + kc, stjarna: st, uppg: up, kassa: ka, rost: ro, onskemal: on };
+  const rader = PRESTATIONER.map(p => {
+    const n = antal[p.id] || 0;
+    const niva = p.niv.filter(t => n >= t).length; // 0–3
+    return { ...p, n, niva, nasta: niva < 3 ? p.niv[niva] : null };
+  });
+  const enkla = [
+    { ikon: "❤️", namn: "Livräddare", beskr: "HLR-utbildad", klar: !!user.hlr_utbildad },
+    { ikon: "📸", namn: "Ansiktet utåt", beskr: "Har en profilbild", klar: !!user.avatar_url },
+  ];
+  const uppnadda = rader.reduce((a, r) => a + r.niva, 0) + enkla.filter(e => e.klar).length;
+  const totalt = rader.length * 3 + enkla.length;
+  const kort = (ikon, namn, beskr, niva, framdrift) => {
+    const nv = niva > 0 ? PRESTATION_NIVA[niva - 1] : null;
+    return `<div style="border:1.5px solid ${nv ? nv.farg : "var(--line)"}; border-radius:12px; padding:10px; background:${nv ? "#fff" : "#f6f7f6"}; ${nv ? "" : "opacity:.75;"}">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:22px; ${nv ? "" : "filter:grayscale(1);"}">${ikon}</span>
+        <div style="min-width:0;">
+          <div style="font-size:12.5px; font-weight:800; line-height:1.2;">${egEsc(namn)}</div>
+          ${nv ? `<div style="font-size:10.5px; font-weight:800; color:${nv.farg};">${nv.namn}</div>` : `<div style="font-size:10.5px; color:var(--muted);">Ej uppnådd</div>`}
+        </div>
+      </div>
+      <div style="font-size:10.5px; color:var(--muted); margin-top:6px; line-height:1.3;">${egEsc(beskr)}</div>
+      ${framdrift || ""}
+    </div>`;
+  };
+  wrap.innerHTML = `
+    <div style="font-size:12px; color:var(--muted); margin-bottom:8px;"><b style="color:var(--ink);">${uppnadda} av ${totalt}</b> prestationsnivåer uppnådda</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      ${rader.map(r => kort(r.ikon, r.namn, r.beskr, r.niva, r.nasta
+        ? `<div style="height:5px; background:var(--line); border-radius:3px; margin-top:6px; overflow:hidden;"><div style="height:100%; width:${Math.min(100, Math.round(r.n / r.nasta * 100))}%; background:var(--green-700);"></div></div><div style="font-size:10px; color:var(--muted); margin-top:2px;">${r.n} av ${r.nasta} till ${PRESTATION_NIVA[r.niva].namn}</div>`
+        : `<div style="font-size:10px; font-weight:800; color:${PRESTATION_NIVA[2].farg}; margin-top:6px;">${r.n} — högsta nivån!</div>`)).join("")}
+      ${enkla.map(e => kort(e.ikon, e.namn, e.beskr, e.klar ? 3 : 0, "")).join("")}
+    </div>`;
+}
+
 async function renderProfileView() {
   await refreshCurrentProfile();
   const user = getCurrentUser();
@@ -3202,6 +3271,21 @@ async function renderProfileView() {
       </div>
       <div id="avatar-error" style="color:#b3261e; font-size:12px; font-weight:700;"></div>
     </div>
+
+    <div class="kassa-section-title">Min yrkesroll</div>
+    <div style="border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:20px; background:var(--green-050);">
+      <div style="font-size:11px; color:var(--muted); font-weight:700;">Yrkesgrupp</div>
+      <div style="font-size:14px; font-weight:800; margin-bottom:8px;">${egEsc(user.utbildning || "Inte angiven — be chefen lägga till")}</div>
+      <div style="font-size:11px; color:var(--muted); font-weight:700; margin-bottom:4px;">Roller</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        ${user.role === "chef" ? `<span style="background:#0b3d2e; color:#fff; font-size:11.5px; font-weight:800; padding:3px 10px; border-radius:999px;">Chef</span>` : ""}
+        ${(user.roll_funktioner || []).map(r => `<span title="${egEsc(ROLLFUNKTION_TITEL[r] || r)}" style="background:#fff; border:1.5px solid var(--green-700); color:var(--green-700); font-size:11.5px; font-weight:800; padding:3px 10px; border-radius:999px;">${egEsc(r)}${ROLLFUNKTION_TITEL[r] ? " · " + egEsc(ROLLFUNKTION_TITEL[r]) : ""}</span>`).join("")}
+        ${user.role !== "chef" && !(user.roll_funktioner || []).length ? `<span style="font-size:12px; color:var(--muted);">Inga särskilda roller</span>` : ""}
+      </div>
+    </div>
+
+    <div class="kassa-section-title">Prestationer</div>
+    <div id="profile-prestationer" style="margin-bottom:20px;"><div style="font-size:12px; color:var(--muted);">Räknar ihop…</div></div>
 
     <div class="kassa-section-title">Notiser</div>
     <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Få en pushnotis direkt i telefonen/datorn t.ex. när chefen svarat på en ledighetsansökan.</div>
@@ -3265,6 +3349,7 @@ async function renderProfileView() {
 
   document.getElementById("avatar-file-input").addEventListener("change", uploadOwnAvatar);
   renderPushToggle();
+  renderPrestationer(user);
 }
 
 async function saveOwnProfile() {
