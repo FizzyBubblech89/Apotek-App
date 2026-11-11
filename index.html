@@ -3181,7 +3181,7 @@ async function showProfile() {
   await renderProfileView();
 }
 
-/* ---- Prestationer (räknas live från befintlig data, inga nya tabeller) ---- */
+/* ---- Prestationer i Min profil (räknas live från befintlig data) ---- */
 const ROLLFUNKTION_TITEL = {};
 const PRESTATIONER = [
   { id: "check", ikon: "✅", namn: "Checklistkollen", beskr: "Avbockade punkter i Lager- och Kvalité-checklistorna", niv: [10, 30, 100] },
@@ -3190,22 +3190,21 @@ const PRESTATIONER = [
   { id: "kassa", ikon: "💰", namn: "Kassakoll", beskr: "Inlagda kassaredovisningar", niv: [5, 25, 100] },
   { id: "rost", ikon: "🗳️", namn: "Engagerad", beskr: "Besvarade omröstningar", niv: [1, 5, 15] },
   { id: "onskemal", ikon: "📅", namn: "Planerare", beskr: "Lämnade schemaönskemål", niv: [1, 3, 6] },
+  { id: "lof", ikon: "🗣️", namn: "LoF-hjälten", beskr: "Lofade under veckor som LoF-ansvarig", niv: [25, 100, 300] },
 ];
 const PRESTATION_NIVA = [
   { namn: "Brons", farg: "#b8793a" },
   { namn: "Silver", farg: "#8a96a3" },
   { namn: "Guld", farg: "#d4a017" },
 ];
-
 async function prestationRakna(q) {
   try { const { count, error } = await q; return error ? 0 : (count || 0); } catch (e) { return 0; }
 }
-
 async function renderPrestationer(user) {
   const wrap = document.getElementById("profile-prestationer");
   if (!wrap) return;
   const head = (t) => sb.from(t).select("id", { count: "exact", head: true });
-  const [lc, kc, st, up, ka, ro, on] = await Promise.all([
+  const [lc, kc, st, up, ka, ro, on, lofT] = await Promise.all([
     prestationRakna(head("lager_checklista").eq("signerad_av", user.id).eq("klar", true)),
     prestationRakna(head("kvalitet_checklista").eq("signerad_av", user.id).eq("klar", true).eq("ej_aktuellt", false)),
     prestationRakna(head("stjarna").eq("user_id", user.id)),
@@ -3213,11 +3212,12 @@ async function renderPrestationer(user) {
     prestationRakna(head("kassaredovisningar").eq("user_id", user.id)),
     prestationRakna(head("poll_svar").eq("user_id", user.id)),
     prestationRakna(head("schemaonskemal").eq("user_id", user.id)),
+    lofTotalForUser(user.id),
   ]);
-  const antal = { check: lc + kc, stjarna: st, uppg: up, kassa: ka, rost: ro, onskemal: on };
+  const antal = { check: lc + kc, stjarna: st, uppg: up, kassa: ka, rost: ro, onskemal: on, lof: lofT.total };
   const rader = PRESTATIONER.map(p => {
     const n = antal[p.id] || 0;
-    const niva = p.niv.filter(t => n >= t).length; // 0–3
+    const niva = p.niv.filter(t => n >= t).length;
     return { ...p, n, niva, nasta: niva < 3 ? p.niv[niva] : null };
   });
   const enkla = [
@@ -3241,6 +3241,10 @@ async function renderPrestationer(user) {
     </div>`;
   };
   wrap.innerHTML = `
+    <div style="border:1.5px solid var(--green-700); border-radius:12px; padding:10px 12px; margin-bottom:10px; background:var(--green-050);">
+      <div style="font-size:11px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;">LoF — totalt</div>
+      <div style="font-size:20px; font-weight:800;">${lofT.total} <span style="font-size:12px; font-weight:600; color:var(--muted);">Lofade under ${lofT.veckor} vecka${lofT.veckor === 1 ? "" : "r"} som ansvarig</span></div>
+    </div>
     <div style="font-size:12px; color:var(--muted); margin-bottom:8px;"><b style="color:var(--ink);">${uppnadda} av ${totalt}</b> prestationsnivåer uppnådda</div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
       ${rader.map(r => kort(r.ikon, r.namn, r.beskr, r.niva, r.nasta
@@ -9975,23 +9979,44 @@ async function showLof() {
   await loadLof();
   renderLofView();
 }
+let lofAnsvarCache = [];
+let lofProfiles = [];
 async function loadLof() {
-  const { data, error } = await sb.from("lof_resultat").select("*");
-  lofCache = error ? [] : data;
+  const [res, ans, profs] = await Promise.all([
+    sb.from("lof_resultat").select("*"),
+    sb.from("lof_ansvarig").select("*").then(r => r, () => ({ data: null, error: true })),
+    fetchProfiles().catch(() => []),
+  ]);
+  lofCache = res.error ? [] : res.data;
+  lofAnsvarCache = ans.error || !ans.data ? [] : ans.data;
+  lofProfiles = profs || [];
 }
+function lofAnsvarFor(ar, vecka) { return lofAnsvarCache.find(a => a.ar === ar && a.vecka === vecka) || null; }
+function lofProfilAv(userId) { return lofProfiles.find(p => p.id === userId) || null; }
+function lofInitialer(userId) { const pr = lofProfilAv(userId); return pr ? (pr.signum || (pr.name || "?").slice(0, 2)).toUpperCase() : ""; }
 
 function lofChartHtml(rader) {
-  if (!rader.some(r => r.post)) return `<div class="empty-state" style="margin-bottom:14px;">Inga resultat registrerade ännu.</div>`;
-  const B = 340, padL = 26, padR = 10, topY = 22, H0 = 90, H = topY + H0 + 24;
+  if (!rader.some(r => r.post || r.ansv)) return `<div class="empty-state" style="margin-bottom:14px;">Inga resultat registrerade ännu.</div>`;
+  const B = 340, padL = 26, padR = 10, topY = 22, H0 = 90, H = topY + H0 + 36;
   const kol = (B - padL - padR) / rader.length;
-  const max = Math.max(1, ...rader.map(r => r.post ? r.post.antal : 0));
+  const max = Math.max(1, ...rader.map(r => Math.max(r.post ? r.post.antal : 0, r.ansv ? r.ansv.mal : 0)));
   const cx = i => padL + i * kol + kol / 2;
   const staplar = rader.map((r, i) => {
-    const etikett = `<text x="${cx(i)}" y="${H - 8}" font-size="7.5" text-anchor="middle" fill="var(--muted)">v${r.vecka}</text>`;
-    if (!r.post) return etikett;
-    const h = Math.max(2, (r.post.antal / max) * H0), w = kol * 0.62, y = topY + H0 - h;
-    return `<rect x="${cx(i) - w / 2}" y="${y}" width="${w}" height="${h}" rx="3" fill="#4caf82"></rect>
-      <text x="${cx(i)}" y="${y - 4}" font-size="9" text-anchor="middle" fill="var(--ink)" font-weight="700">${r.post.antal}</text>${etikett}`;
+    const etikett = `<text x="${cx(i)}" y="${H - 20}" font-size="7.5" text-anchor="middle" fill="var(--muted)">v${r.vecka}</text>` +
+      (r.ansv ? `<text x="${cx(i)}" y="${H - 8}" font-size="7.5" text-anchor="middle" font-weight="800" fill="var(--green-700)">${egEsc(lofInitialer(r.ansv.user_id))}</text>` : "");
+    const w = kol * 0.62;
+    let ut = etikett;
+    if (r.post) {
+      const h = Math.max(2, (r.post.antal / max) * H0), y = topY + H0 - h;
+      const natt = r.ansv && r.post.antal >= r.ansv.mal;
+      ut += `<rect x="${cx(i) - w / 2}" y="${y}" width="${w}" height="${h}" rx="3" fill="${natt ? "#2e9e66" : "#4caf82"}"></rect>
+        <text x="${cx(i)}" y="${y - 4}" font-size="9" text-anchor="middle" fill="var(--ink)" font-weight="700">${r.post.antal}</text>`;
+    }
+    if (r.ansv) {
+      const ym = topY + H0 - (r.ansv.mal / max) * H0;
+      ut += `<line x1="${cx(i) - w / 2 - 2}" y1="${ym}" x2="${cx(i) + w / 2 + 2}" y2="${ym}" stroke="#d9772b" stroke-width="1.6" stroke-dasharray="3 2"></line>`;
+    }
+    return ut;
   }).join("");
   return `
     <svg viewBox="0 0 ${B} ${H}" style="width:100%; height:auto; background:var(--white); border:1px solid var(--line); border-radius:14px; margin-bottom:6px;">
@@ -9999,40 +10024,178 @@ function lofChartHtml(rader) {
       <line x1="${padL}" y1="${topY + H0}" x2="${B - padR}" y2="${topY + H0}" stroke="var(--line)" stroke-width="1"></line>
       ${staplar}
     </svg>
-    <div style="font-size:10px; color:var(--muted); text-align:center; margin-bottom:14px;">Senaste 12 veckorna</div>`;
+    <div style="font-size:10px; color:var(--muted); text-align:center; margin-bottom:14px;">Senaste 12 veckorna · bokstäverna visar ansvarig, <span style="color:#d9772b; font-weight:800;">streckad linje</span> = veckans mål</div>`;
 }
 
 function renderLofView() {
   const container = document.getElementById("kundmote-results");
   const nu = isoVeckaAv(new Date());
+  const chef = isChef();
   const rader = [];
   for (let i = 0; i < 12; i++) {
     const m = veckansMandag(nu.ar, nu.vecka);
     m.setDate(m.getDate() - 7 * i);
     const w = isoVeckaAv(m);
-    rader.push({ ar: w.ar, vecka: w.vecka, mandag: m, post: lofCache.find(r => r.ar === w.ar && r.vecka === w.vecka) || null });
+    rader.push({ ar: w.ar, vecka: w.vecka, mandag: m, post: lofCache.find(r => r.ar === w.ar && r.vecka === w.vecka) || null, ansv: lofAnsvarFor(w.ar, w.vecka) });
+  }
+  const framtid = [];
+  for (let i = 0; i < 8; i++) {
+    const m = veckansMandag(nu.ar, nu.vecka);
+    m.setDate(m.getDate() + 7 * i);
+    const w = isoVeckaAv(m);
+    framtid.push({ ar: w.ar, vecka: w.vecka, mandag: m, ansv: lofAnsvarFor(w.ar, w.vecka) });
   }
   const summa = rader.reduce((s, r) => s + (r.post ? r.post.antal : 0), 0);
   const kort = d => `${d.getDate()}/${d.getMonth() + 1}`;
+  const sluta = m => { const d = new Date(m); d.setDate(d.getDate() + 6); return d; };
+  const namnAv = a => { const pr = lofProfilAv(a.user_id); return pr ? egEsc(pr.name) : "Okänd"; };
   container.innerHTML = `
     <div style="font-weight:800; font-size:15px; margin-bottom:10px;">LoF</div>
     ${lofChartHtml([...rader].reverse())}
+    <div style="font-weight:800; font-size:13px; margin:4px 0 6px;">LoF-ansvarig — vecka för vecka</div>
+    ${chef ? `<button class="btn-primary" onclick="openLofAnsvarModal(null)">+ Utse LoF-ansvarig</button>` : ""}
+    <div class="kassa-row-list" style="margin-top:8px; margin-bottom:16px;">
+      ${framtid.map(f => `<div class="kassa-row" ${chef ? `onclick="openLofAnsvarModal(${f.ansv ? `'${f.ansv.id}'` : `null, ${f.ar}, ${f.vecka}`})"` : `style="cursor:default;"`}>
+        <div style="flex:1;">Vecka ${f.vecka} <span style="font-size:11px; color:var(--muted);">${kort(f.mandag)}–${kort(sluta(f.mandag))}${f === framtid[0] ? " · denna vecka" : ""}</span></div>
+        <div style="text-align:right; font-size:12.5px; ${f.ansv ? "font-weight:800;" : "color:var(--muted);"}">${f.ansv ? `${namnAv(f.ansv)} · mål ${f.ansv.mal}` : (chef ? "Ej utsedd — tryck" : "Ej utsedd")}</div></div>`).join("")}
+    </div>
     <button class="btn-primary" onclick="openLofModal(null)">Registrera ny vecka</button>
     <div class="kassa-row-list" style="margin-top:16px;">
       <div class="kassa-row" style="cursor:default; font-size:11px; font-weight:800; color:var(--muted);">
         <div style="flex:1;">Vecka</div><div style="width:64px; text-align:right;">Lofade</div>
       </div>
-      ${rader.map(r => {
-        const sön = new Date(r.mandag); sön.setDate(sön.getDate() + 6);
-        return `<div class="kassa-row" onclick="openLofModal(${r.post ? `'${r.post.id}'` : `null, ${r.ar}, ${r.vecka}`})">
-          <div style="flex:1;">Vecka ${r.vecka} <span style="font-size:11px; color:var(--muted);">${kort(r.mandag)}–${kort(sön)} ${r.ar}</span></div>
-          <div style="width:64px; text-align:right; font-weight:800;">${r.post ? r.post.antal : "–"}</div></div>`;
-      }).join("")}
+      ${rader.map(r => `<div class="kassa-row" onclick="openLofModal(${r.post ? `'${r.post.id}'` : `null, ${r.ar}, ${r.vecka}`})">
+          <div style="flex:1;">Vecka ${r.vecka} <span style="font-size:11px; color:var(--muted);">${kort(r.mandag)}–${kort(sluta(r.mandag))} ${r.ar}</span>
+            ${r.ansv ? `<div style="font-size:11px; color:var(--green-700); font-weight:700;">${namnAv(r.ansv)} · mål ${r.ansv.mal}${r.post ? (r.post.antal >= r.ansv.mal ? " ✓" : "") : ""}</div>` : ""}</div>
+          <div style="width:64px; text-align:right; font-weight:800;">${r.post ? r.post.antal : "–"}</div></div>`).join("")}
       <div class="kassa-row" style="cursor:default; font-weight:800; background:var(--green-100);">
         <div style="flex:1;">Totalt 12 veckor</div><div style="width:64px; text-align:right;">${summa}</div>
       </div>
     </div>
     <div style="font-size:11px; color:var(--muted); margin-top:8px;">Tryck på en vecka för att registrera eller ändra.</div>`;
+}
+
+/* ---- LoF-ansvarig: chefen utser en person per vecka med ett mål ---- */
+let lofAnsvarDraft = null;
+function lofVeckoAlternativ() {
+  const nu = isoVeckaAv(new Date()), lista = [];
+  for (let i = 0; i < 26; i++) {
+    const m = veckansMandag(nu.ar, nu.vecka); m.setDate(m.getDate() + 7 * i);
+    const w = isoVeckaAv(m), sl = new Date(m); sl.setDate(sl.getDate() + 6);
+    lista.push({ ar: w.ar, vecka: w.vecka, text: `Vecka ${w.vecka} (${m.getDate()}/${m.getMonth() + 1}–${sl.getDate()}/${sl.getMonth() + 1})` });
+  }
+  return lista;
+}
+function openLofAnsvarModal(id, ar, vecka) {
+  if (!isChef()) return;
+  const bef = id ? lofAnsvarCache.find(r => r.id === id) : null;
+  const nu = isoVeckaAv(new Date());
+  lofAnsvarDraft = bef ? { id: bef.id, ar: bef.ar, vecka: bef.vecka, user_id: bef.user_id, mal: String(bef.mal) }
+    : { id: null, ar: ar || nu.ar, vecka: vecka || nu.vecka, user_id: "", mal: "" };
+  const veckor = lofVeckoAlternativ();
+  if (!veckor.some(v => v.ar === lofAnsvarDraft.ar && v.vecka === lofAnsvarDraft.vecka)) veckor.unshift({ ar: lofAnsvarDraft.ar, vecka: lofAnsvarDraft.vecka, text: `Vecka ${lofAnsvarDraft.vecka} ${lofAnsvarDraft.ar}` });
+  const personer = [...lofProfiles].sort((a, b) => (a.name || "").localeCompare(b.name || "", "sv"));
+  const ov = document.createElement("div");
+  ov.className = "kassa-modal-overlay";
+  ov.id = "lofansvar-overlay";
+  ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div class="kassa-modal-card">
+      <div class="kassa-modal-title">LoF-ansvarig — ${bef ? "ändra" : "utse"}</div>
+      <div class="field-group"><label class="field-label">Vecka (du kan planera i förväg)</label>
+        <select class="field-input" onchange="const [a,v]=this.value.split('-');lofAnsvarDraft.ar=+a;lofAnsvarDraft.vecka=+v;">
+          ${veckor.map(v => `<option value="${v.ar}-${v.vecka}" ${v.ar === lofAnsvarDraft.ar && v.vecka === lofAnsvarDraft.vecka ? "selected" : ""}>${v.text}</option>`).join("")}
+        </select></div>
+      <div class="field-group"><label class="field-label">Ansvarig</label>
+        <select class="field-input" onchange="lofAnsvarDraft.user_id=this.value;">
+          <option value="">Välj medarbetare…</option>
+          ${personer.map(p => `<option value="${p.id}" ${p.id === lofAnsvarDraft.user_id ? "selected" : ""}>${egEsc(p.name)}</option>`).join("")}
+        </select></div>
+      <div class="field-group"><label class="field-label">Mål — antal Lofade under veckan</label>
+        <input class="field-input" type="number" min="1" step="1" value="${lofAnsvarDraft.mal}" placeholder="T.ex. 15" oninput="lofAnsvarDraft.mal=this.value"></div>
+      <div style="font-size:11px; color:var(--muted); margin-bottom:8px;">Personen får en pushnotis direkt och en fäst notis på startsidan under veckan. På fredagen påminns personen om hur många som återstår.</div>
+      <div id="lofansvar-error" style="color:#b3261e; font-size:12.5px; font-weight:700; text-align:center; margin-bottom:8px;"></div>
+      <button class="btn-primary" onclick="submitLofAnsvar()">Spara</button>
+      ${bef ? `<button class="btn-secondary" style="color:#b3261e;" onclick="deleteLofAnsvar('${bef.id}')">Ta bort</button>` : ""}
+      <button class="btn-secondary" onclick="document.getElementById('lofansvar-overlay').remove()">Avbryt</button>
+    </div>`;
+  document.body.appendChild(ov);
+}
+async function submitLofAnsvar() {
+  const err = document.getElementById("lofansvar-error");
+  const d = lofAnsvarDraft;
+  const mal = parseInt(d.mal, 10);
+  if (!d.user_id) { err.textContent = "Välj vem som är ansvarig."; return; }
+  if (isNaN(mal) || mal < 1) { err.textContent = "Fyll i ett mål (1 eller mer)."; return; }
+  err.textContent = "Sparar…";
+  const fält = { ar: d.ar, vecka: d.vecka, user_id: d.user_id, mal };
+  const befintlig = lofAnsvarFor(d.ar, d.vecka);
+  const nyttIdOchAndrad = !befintlig || befintlig.user_id !== d.user_id || befintlig.mal !== mal;
+  const { error } = (d.id || befintlig)
+    ? await sb.from("lof_ansvarig").update(fält).eq("id", d.id || befintlig.id)
+    : await sb.from("lof_ansvarig").insert({ ...fält, created_by: getCurrentUser().id });
+  if (error) { err.textContent = "Kunde inte spara: " + error.message; return; }
+  if (nyttIdOchAndrad && d.user_id !== getCurrentUser().id) {
+    const m = veckansMandag(d.ar, d.vecka);
+    const dagText = `${m.getDate()}/${m.getMonth() + 1}`;
+    sendPushToUsers([d.user_id], `Du är LoF-ansvarig vecka ${d.vecka}`, `Mål: ${mal} Lofade (vecka startar ${dagText}). Lycka till!`, "./");
+  }
+  document.getElementById("lofansvar-overlay").remove();
+  await loadLof();
+  renderLofView();
+}
+function deleteLofAnsvar(id) {
+  confirmDelete("Ta bort ansvarig?", "Veckans LoF-ansvarig och mål tas bort.", async () => {
+    const { error } = await sb.from("lof_ansvarig").delete().eq("id", id);
+    if (error) { alert("Kunde inte ta bort: " + error.message); return; }
+    document.getElementById("lofansvar-overlay")?.remove();
+    await loadLof();
+    renderLofView();
+  });
+}
+
+/* Fäst notis på startsidan för veckans LoF-ansvarig */
+async function lofNotisHtml(user) {
+  try {
+    const nu = isoVeckaAv(new Date());
+    const { data: ans } = await sb.from("lof_ansvarig").select("*").eq("user_id", user.id).eq("ar", nu.ar).eq("vecka", nu.vecka).maybeSingle();
+    if (!ans) return "";
+    const { data: res } = await sb.from("lof_resultat").select("antal").eq("ar", nu.ar).eq("vecka", nu.vecka).maybeSingle();
+    const antal = res ? res.antal : 0, kvar = Math.max(0, ans.mal - antal), over = Math.max(0, antal - ans.mal);
+    const dag = new Date().getDay();
+    const sent = dag === 5 || dag === 6 || dag === 0;
+    const natt = kvar === 0;
+    const farg = natt ? { bg: "#e6f6ec", br: "#4caf82", t: "#1f7a4d" } : sent ? { bg: "#fff1e0", br: "#e8963f", t: "#b2610f" } : { bg: "#eaf5ef", br: "#6bbf94", t: "#1f7a4d" };
+    const pct = Math.min(100, Math.round(antal / ans.mal * 100));
+    return `
+      <div onclick="lofFranHem()" style="cursor:pointer; background:${farg.bg}; border:1.5px solid ${farg.br}; border-radius:12px; padding:10px 12px; margin-bottom:8px;">
+        <div style="font-size:11px; font-weight:800; color:${farg.t}; letter-spacing:.04em; text-transform:uppercase; margin-bottom:3px;">📌 Du är LoF-ansvarig · vecka ${ans.vecka}</div>
+        <div style="font-size:13.5px; font-weight:700;">${natt ? (over > 0 ? `Målet nått! ${antal} av ${ans.mal} (+${over} över målet) 🎉` : `Målet nått! ${antal} av ${ans.mal} 🎉`) : `${kvar} kvar till målet — ${antal} av ${ans.mal} Lofade`}</div>
+        ${sent && !natt ? `<div style="font-size:12px; color:${farg.t}; font-weight:700; margin-top:2px;">Det är helgen snart — ${kvar} kvar!</div>` : ""}
+        <div style="height:6px; background:rgba(0,0,0,.08); border-radius:3px; margin-top:7px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:${natt ? "#2e9e66" : "#e8963f"};"></div></div>
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">Tryck för att registrera veckans Lofade</div>
+      </div>`;
+  } catch (e) { return ""; }
+}
+async function lofFranHem() {
+  const nu = isoVeckaAv(new Date());
+  await showKundmote();
+  await showLof();
+  const post = lofCache.find(r => r.ar === nu.ar && r.vecka === nu.vecka);
+  openLofModal(post ? post.id : null, nu.ar, nu.vecka);
+}
+
+/* Totalt antal Lofade för en person = summan av veckor där personen var ansvarig */
+async function lofTotalForUser(userId) {
+  try {
+    const { data: ans } = await sb.from("lof_ansvarig").select("ar, vecka").eq("user_id", userId);
+    if (!ans || !ans.length) return { total: 0, veckor: 0 };
+    const nu = isoVeckaAv(new Date());
+    const gjorda = ans.filter(a => a.ar < nu.ar || (a.ar === nu.ar && a.vecka <= nu.vecka));
+    const { data: res } = await sb.from("lof_resultat").select("ar, vecka, antal");
+    const total = gjorda.reduce((sum, a) => { const r = (res || []).find(x => x.ar === a.ar && x.vecka === a.vecka); return sum + (r ? r.antal : 0); }, 0);
+    return { total, veckor: gjorda.length };
+  } catch (e) { return { total: 0, veckor: 0 }; }
 }
 
 function openLofModal(id, ar, vecka) {
@@ -11059,6 +11222,7 @@ let personligMotenAllaProfiler = [];
 
 async function showPersonligaMoten() {
   document.getElementById("view-home").style.display = "none";
+  document.getElementById("view-moten").style.display = "none";
   document.getElementById("view-personliga-moten").style.display = "block";
   const user = getCurrentUser();
   personligMotenAllaProfiler = await fetchProfiles();
@@ -14321,6 +14485,7 @@ async function renderTodayWidget(user, tyst) {
   // Pågående omröstningar hämtas parallellt med resten.
   const pollP = hamtaOmrostningarHtml(user);
   const periodP = soNotisHtml();
+  const lofP = lofNotisHtml(user);
   const viktigP = sb.from("viktig_info").select("*").order("created_at", { ascending: true }).then(r => r, () => ({ data: null, error: true }));
 
   const todayIso = isoDate(new Date());
@@ -14625,7 +14790,8 @@ async function renderTodayWidget(user, tyst) {
   const showCollapsed = noticeBlocks.length > 5;
   let viktigInfoHtml = "";
   let pollHtml = "";
-  try { pollHtml = await pollP; } catch (e) {}
+  try { pollHtml = await lofP; } catch (e) {}
+  try { pollHtml += await pollP; } catch (e) {}
   try { pollHtml += await periodP; } catch (e) {}
   try {
     const { data: vi, error: viErr } = await viktigP;
